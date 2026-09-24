@@ -8,6 +8,7 @@ Repeated live-model report scoring remains open.
 
 | Document | Purpose |
 |---|---|
+| [Architecture tour](architecture-tour.md) | Start here: progressive system explanation, document graph, and source-code map |
 | [Day 4 results](day-4-results.md) | Core review fixes, evaluator, repeated AWS results, limitations and teardown |
 | [Requirements verification](requirements-verification.md) | Fresh command outputs, scenario setup, P0 matrix and teardown proof |
 | [MVP release hardening](release-hardening-plan.md) | Prioritized release gaps, implementation stages and final acceptance gates |

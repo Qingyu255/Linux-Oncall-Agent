@@ -10,8 +10,9 @@ evidence gates from human diagnostic review. Live DSH/OpenAI runs now include a 
 `gpt-5.6-terra` CPU diagnosis and a retained `gpt-4.1-mini` semantic failure. The repeated
 report-quality matrix remains open.
 
-Start with the [Day 4 results](docs/day-4-results.md), the [documentation index](docs/README.md), and
-the [MVP release hardening plan](docs/release-hardening-plan.md).
+Start with the [architecture tour](docs/architecture-tour.md), then use the
+[documentation index](docs/README.md) to reach the detailed specifications, measured results, and
+[MVP release hardening plan](docs/release-hardening-plan.md).
 
 The first release targets CPU saturation, cgroup OOM, and filesystem capacity exhaustion. DeepSeek Harness is the current runtime; the Python capability layer remains independent of it.
 
