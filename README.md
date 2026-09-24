@@ -139,6 +139,41 @@ See [AWS and Terraform](docs/aws-terraform.md) for provisioning and the SSM tunn
 The terminal shows a compact diagnosis, evidence table, limitations, next steps, and artifact paths.
 Complete JSON and Markdown remain under `.local/reports/<investigation-id>/`.
 
+## Quick start: disposable AWS fault lab
+
+Requirements are configured AWS credentials, AWS CLI, the Session Manager plugin, Terraform, and the
+ignored `terraform.tfvars` files described in [AWS and Terraform](docs/aws-terraform.md). Run setup once
+from the repository root; it builds and uploads the current wheel, provisions the target, waits for
+readiness, and enrolls its scoped credential and CA:
+
+```bash
+scripts/aws_lab.sh setup
+```
+
+Keep the fixed-port SSM tunnel open in a dedicated terminal:
+
+```bash
+scripts/aws_lab.sh tunnel
+```
+
+In another terminal, connect the broker to the AWS target and verify that readiness shows the new EC2
+instance ID rather than `docker-target`:
+
+```bash
+docker compose -f compose.yaml -f compose.aws.yaml \
+  up -d --wait --force-recreate broker
+
+.venv/bin/oncall doctor
+```
+
+Use the `lab-start`, `investigate`, and `lab-stop` commands above to exercise CPU, memory, or filesystem
+faults. When finished, reset any reachable fault, terminate target SSM sessions, remove enrollment, and
+destroy the lab and bootstrap resources:
+
+```bash
+scripts/aws_lab.sh teardown
+```
+
 ## Resource teardown
 
 Stop local containers while retaining named volumes:
@@ -157,17 +192,10 @@ docker compose down --volumes --remove-orphans
 Host exports under `.local/reports/`, `.local/evaluation/`, and `.local/aws/` are not Docker volumes.
 Review them first, then remove only the data you no longer need. `.local/` and `.env` are ignored by Git.
 
-For AWS, always reset a leased fault before destroying infrastructure, then destroy the lab before its
-state/release bootstrap:
+For AWS, use the lifecycle wrapper described above. It always destroys the lab before its state and
+release bootstrap:
 
 ```bash
-# Provision, enroll, and export .local/aws/inventory.json.
-scripts/aws_lab.sh setup
-
-# Open the SSM tunnel in a dedicated terminal for interactive investigations.
-scripts/aws_lab.sh tunnel
-
-# Reset a fault when reachable, remove enrollment, and destroy lab then bootstrap.
 scripts/aws_lab.sh teardown
 ```
 
