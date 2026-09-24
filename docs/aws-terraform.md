@@ -92,17 +92,24 @@ Package installation success is not application readiness. Bootstrap scripts mus
 
 ## Operator workflow
 
-After the Terraform files exist, the expected commands are:
+The repository wrapper builds and uploads a content-addressed wheel, applies bootstrap before the lab,
+exports a validated disposable inventory, waits for target readiness, and enrolls the scoped target
+credential and CA without displaying them:
 
 ```bash
-terraform -chdir=infra/terraform/bootstrap init
-terraform -chdir=infra/terraform/bootstrap plan -out=bootstrap.tfplan
-terraform -chdir=infra/terraform/bootstrap apply bootstrap.tfplan
-# Configure/migrate backend and upload the release before lab apply.
-terraform -chdir=infra/terraform/environments/lab init -backend-config=backend.hcl
-terraform -chdir=infra/terraform/environments/lab plan -out=lab.tfplan
-terraform -chdir=infra/terraform/environments/lab apply lab.tfplan
+scripts/aws_lab.sh setup
+scripts/aws_lab.sh tunnel  # keep this terminal open during interactive investigations
+scripts/aws_lab.sh teardown
 ```
+
+`setup` defaults to an eight-hour expiry tag, accepts `--expiry-hours`, `--region`, and `--inventory`,
+and caps the tag offset at 72 hours. The expiry tag is descriptive; teardown remains explicit. The
+`tunnel` command owns the fixed-port SSM session and terminates it on Ctrl-C or SIGTERM. In another
+terminal, start the broker with `compose.yaml` plus `compose.aws.yaml`, then require `oncall doctor` to
+show the inventory instance ID before injecting a fault. `teardown` validates that the inventory is
+explicitly disposable, attempts fault cleanup, terminates active target sessions, removes the
+enrollment parameter, destroys the lab root, and only then destroys the bootstrap buckets. Reports and
+evaluation bundles are retained.
 
 Use `oncall doctor` to validate runtime readiness. The controller manages the fixed-document SSM
 subprocess, captures its session ID, requests remote session termination on shutdown, then reaps the

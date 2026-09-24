@@ -161,11 +161,14 @@ For AWS, always reset a leased fault before destroying infrastructure, then dest
 state/release bootstrap:
 
 ```bash
-.venv/bin/oncall lab-stop --inventory .local/aws/inventory.json  # when a lease exists
-terraform -chdir=infra/terraform/environments/lab plan -destroy -out=destroy.tfplan
-terraform -chdir=infra/terraform/environments/lab apply destroy.tfplan
-terraform -chdir=infra/terraform/bootstrap plan -destroy -out=destroy.tfplan
-terraform -chdir=infra/terraform/bootstrap apply destroy.tfplan
+# Provision, enroll, and export .local/aws/inventory.json.
+scripts/aws_lab.sh setup
+
+# Open the SSM tunnel in a dedicated terminal for interactive investigations.
+scripts/aws_lab.sh tunnel
+
+# Reset a fault when reachable, remove enrollment, and destroy lab then bootstrap.
+scripts/aws_lab.sh teardown
 ```
 
 Terminate any remaining SSM tunnel process and verify there are no project EC2 instances, EBS volumes,
