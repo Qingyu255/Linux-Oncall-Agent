@@ -1,0 +1,87 @@
+name: linux-oncall
+
+x-security: &security
+  init: true
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+
+services:
+  target:
+    <<: *security
+    build: {context: ., dockerfile: docker/Dockerfile, target: core}
+    image: linux-oncall-core:day1
+    command: [uvicorn, oncall.target:create_app, --factory, --host, 0.0.0.0, --port, "8765", --no-access-log]
+    networks: [target_net]
+    secrets: [target_token]
+    volumes: ["labdata:/var/lib/oncall-lab/data:ro"]
+    cpus: 1.0
+    mem_limit: 256m
+    environment: {TARGET_ID: docker-target}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8765/health',timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  broker:
+    <<: *security
+    image: linux-oncall-core:day1
+    build: {context: ., dockerfile: docker/Dockerfile, target: core}
+    command: [uvicorn, oncall.broker:create_app, --factory, --host, 0.0.0.0, --port, "8787", --no-access-log]
+    networks: [agent_net, target_net, egress]
+    sysctls: {net.ipv4.ip_forward: "0"}
+    ports: ["127.0.0.1:8787:8787"]
+    secrets: [target_token, agent_token, admin_token]
+    volumes: ["evidence:/data"]
+    cpus: 1.0
+    mem_limit: 512m
+    environment:
+      ONCALL_PROVIDER: ${ONCALL_PROVIDER:-fixture}
+      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-4.1-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      target: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8787/health',timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  agent:
+    <<: *security
+    profiles: [agent]
+    build: {context: ., dockerfile: docker/Dockerfile, target: agent}
+    image: linux-oncall-agent:day1
+    entrypoint: [python, -m, oncall.harness_runner]
+    networks: [agent_net]
+    secrets: [agent_token]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m,uid=1000,gid=1000
+      # DeepSeek Harness loads its native sandbox binding from this cache.
+      - /workspace:rw,exec,nosuid,nodev,size=128m,uid=1000,gid=1000
+    cpus: 1.0
+    mem_limit: 1536m
+    environment:
+      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-4.1-mini}
+      HOME: /workspace
+    depends_on:
+      broker: {condition: service_healthy}
+
+networks:
+  agent_net: {internal: true}
+  target_net: {internal: true}
+  egress: {}
+
+volumes:
+  evidence: {}
+  labdata: {}
+
+secrets:
+  target_token: {file: .local/lab/secrets/target_token}
+  agent_token: {file: .local/lab/secrets/agent_token}
+  admin_token: {file: .local/lab/secrets/admin_token}
