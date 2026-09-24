@@ -13,8 +13,8 @@ x-security: &security
 services:
   target:
     <<: *security
-    build: {context: ., dockerfile: docker/Dockerfile, target: core}
-    image: linux-oncall-core:day1
+    build: {context: ., dockerfile: docker/Dockerfile, target: target}
+    image: linux-oncall-target:day1
     command: [uvicorn, oncall.target:create_app, --factory, --host, 0.0.0.0, --port, "8765", --no-access-log]
     networks: [target_net]
     secrets: [target_token]
