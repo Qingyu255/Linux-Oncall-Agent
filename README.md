@@ -79,6 +79,23 @@ Healthy control—inject nothing after a clean start:
   "Check whether the target shows CPU, memory, or filesystem pressure. Do not invent a fault."
 ```
 
+Follow up on an existing result explicitly. This creates a child investigation; it does not silently
+reuse a hidden model conversation:
+
+```bash
+.venv/bin/oncall continue <run-id> --message \
+  "Explain why the earlier evidence ruled out host-wide CPU saturation."
+
+# Inspect or close one run by ID.
+.venv/bin/oncall status <run-id>
+.venv/bin/oncall close <run-id>
+```
+
+Prior evidence is exposed with its age and `historical` scope. Retrospective findings may cite it.
+Any finding about current conditions must cite fresh evidence collected by the child run. The first
+new observation verifies the target identity and records whether the boot ID is unchanged or rebooted.
+Continuation is available for 24 hours and is limited to five generations.
+
 CPU pressure—two bounded workers share the target container's one-core quota and stop automatically:
 
 ```bash

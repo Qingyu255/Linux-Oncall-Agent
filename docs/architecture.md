@@ -95,17 +95,26 @@ stateDiagram-v2
     cancelling --> cancelled: workers stopped
     running --> failed: unrecoverable service error
     running --> interrupted: controller lost
-    interrupted --> running: explicit resume and fresh preflight
-    interrupted --> cancelled: operator closes run
+    running --> closed: operator closes run
+    completed --> child: explicit continuation
+    inconclusive --> child: explicit continuation
+    interrupted --> child: explicit continuation
+    child --> running: new bounded observation window
     completed --> [*]
     inconclusive --> [*]
     cancelled --> [*]
+    closed --> [*]
     failed --> [*]
 ```
 
 The lifecycle controls resources, not diagnostic ordering. The model chooses which question to investigate next. No hardcoded CPU-to-memory-to-disk reasoning graph is required. A report validation failure returns structured feedback; allow at most one correction within the original budget, then export an inconclusive report.
 
-Resume retains old evidence with timestamps and rechecks boot ID and process identity; it never silently treats old samples as current. Core release persists state and reports after crashes; seamless model-session resume is a follow-on.
+Continuation creates an audited child run rather than reopening or mutating a terminal report. The
+child reconstructs context from persisted reports, hypotheses, and evidence instead of relying on a
+hidden model transcript. Prior evidence carries its age and `historical` scope. Retrospective claims
+may cite that scope; current claims require fresh child evidence. The first child observation checks
+target identity and records whether the boot ID is unchanged or rebooted. Continuations have a
+24-hour TTL and a five-generation depth limit. Seamless model-process resume remains a follow-on.
 
 ## Data ownership
 

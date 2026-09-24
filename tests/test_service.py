@@ -19,10 +19,10 @@ from oncall.service import InvestigationService
 from oncall.storage import EvidenceStore
 
 
-def observation(request):
+def observation(request, target_id="test-target", boot_id="boot-1"):
     return Observation(
-        target_id="test-target",
-        boot_id="boot-1",
+        target_id=target_id,
+        boot_id=boot_id,
         request=request,
         started_at=utcnow(),
         completed_at=utcnow(),
@@ -46,11 +46,13 @@ def observation(request):
 class Target:
     delay: float = 0
     count: int = 0
+    target_id: str = "test-target"
+    boot_id: str = "boot-1"
 
     async def collect(self, request):
         self.count += 1
         await asyncio.sleep(self.delay)
-        return observation(request)
+        return observation(request, self.target_id, self.boot_id)
 
 
 @pytest.fixture
@@ -197,4 +199,151 @@ def test_store_supports_fastapi_worker_threads(tmp_path):
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         states = list(executor.map(lambda _: store.state(run), range(4)))
     assert {state["status"] for state in states} == {"running"}
+    store.close()
+
+
+async def test_continuation_exposes_historical_context_and_scopes_claims(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(Target(), store)
+    parent = service.begin("test")
+    prior = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    service.submit(
+        Report(
+            outcome="completed",
+            summary="Original diagnosis",
+            claims=(
+                Claim(
+                    text="CPU was sampled in the original run",
+                    evidence_ids=(prior.evidence_id,),
+                    fact_fields=("host_busy_pct",),
+                ),
+            ),
+            alternatives=("Expected load",),
+            limitations=("Short sample",),
+            next_steps=("Follow up explicitly",),
+        )
+    )
+
+    child = service.begin("test", parent_id=parent)
+    state = service.state()
+    context = state["continuation"]
+    assert state["parent_investigation_id"] == parent
+    assert context["target_relationship"] == "unverified"
+    assert context["historical_evidence"][0]["evidence_id"] == prior.evidence_id
+    assert context["historical_evidence"][0]["evidence_scope"] == "historical"
+    assert context["historical_evidence"][0]["age_seconds"] >= 0
+
+    accepted = service.submit(
+        Report(
+            outcome="completed",
+            summary="Retrospective answer",
+            claims=(
+                Claim(
+                    text="The original run sampled host CPU",
+                    evidence_ids=(prior.evidence_id,),
+                    fact_fields=("host_busy_pct",),
+                    evidence_scope="historical",
+                ),
+            ),
+            alternatives=("The old sample was brief",),
+            limitations=("This does not describe current conditions",),
+            next_steps=("Collect a new sample for current conditions",),
+        )
+    )
+    assert accepted["investigation_id"] == child
+    assert not store.evidence(child)
+    store.close()
+
+
+async def test_current_continuation_claim_requires_fresh_child_evidence(tmp_path):
+    store = EvidenceStore(tmp_path)
+    target = Target()
+    service = InvestigationService(target, store)
+    parent = service.begin("test")
+    prior = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    service.submit(report(prior.evidence_id))
+    child = service.begin("test", parent_id=parent)
+
+    with pytest.raises(PolicyError, match="Current claim"):
+        service.submit(report(prior.evidence_id))
+
+    current = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    assert service.state()["continuation"]["target_relationship"] == "same_boot"
+    service.submit(report(current.evidence_id))
+    assert service.store.state(child)["status"] == "inconclusive"
+    store.close()
+
+
+async def test_continuation_rejects_target_change_and_labels_reboot(tmp_path):
+    store = EvidenceStore(tmp_path)
+    target = Target()
+    service = InvestigationService(target, store)
+    parent = service.begin("test")
+    prior = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    service.submit(report(prior.evidence_id))
+
+    service.begin("test", parent_id=parent)
+    target.target_id = "another-target"
+    with pytest.raises(PolicyError, match="target identity"):
+        await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    assert not service.store.evidence(service.run_id)
+    service.close_run(service.run_id)
+
+    service.begin("test", parent_id=parent)
+    target.target_id = "test-target"
+    target.boot_id = "boot-2"
+    await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    assert service.state()["continuation"]["target_relationship"] == "rebooted"
+    events = store.events(service.run_id)
+    assert any(
+        event["kind"] == "target_identity_checked"
+        and event["payload"]["relationship"] == "rebooted"
+        for event in events
+    )
+    store.close()
+
+
+async def test_continuation_can_page_historical_artifact_but_not_foreign_artifact(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(Target(), store)
+    parent = service.begin("test")
+    prior = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    service.submit(report(prior.evidence_id))
+    service.begin("test", parent_id=parent)
+
+    page = service.read_artifact(prior.artifact_id, 0, 100)
+    assert page["text"] == "fixture raw observation"
+    assert page["evidence_scope"] == "historical"
+
+    foreign = store.create_run("test")
+    other = store.add(foreign, observation(ProbeRequest(name="sample_cpu_pressure")))
+    with pytest.raises(ValueError, match="lineage"):
+        service.read_artifact(other.artifact_id, 0, 100)
+    store.close()
+
+
+async def test_close_is_idempotent_for_terminal_report(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(Target(), store)
+    run = service.begin("test")
+    assert service.close_run(run)["status"] == "closed"
+    assert service.close_run(run)["status"] == "closed"
+    with pytest.raises(ValueError, match="terminal"):
+        store.finish(run, "cancelled")
+    store.close()
+
+
+async def test_continuation_ttl_rejects_stale_parent(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(Target(), store, continuation_ttl_seconds=60)
+    parent = service.begin("test")
+    prior = await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+    service.submit(report(prior.evidence_id))
+    with store.lock, store.db:
+        store.db.execute(
+            "UPDATE runs SET finished='2000-01-01T00:00:00+00:00' WHERE id=?", (parent,)
+        )
+
+    with pytest.raises(PolicyError, match="TTL"):
+        service.begin("test", parent_id=parent)
     store.close()

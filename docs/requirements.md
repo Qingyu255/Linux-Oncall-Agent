@@ -64,6 +64,7 @@ matrix. P1 is a follow-on and P2 is research scope.
 | R22 | P1 | Native harness context/policy extensions | A measured failure motivates each extension; before/after evaluation |
 | R23 | P2 | Custom loop or evidence-aware compaction | Demonstrable improvement over stock loop without weakened boundaries |
 | R24 | P2 | Multiple models and direct-shell baselines | Controlled experiments disclose confounders and separate privileged baselines |
+| R25 | P1 | Explicit incident continuation without hidden memory | Child run links an immutable parent, labels historical evidence and requires fresh evidence for current claims |
 
 ## Diagnostic scope
 

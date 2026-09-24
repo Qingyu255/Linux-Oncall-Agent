@@ -129,10 +129,9 @@ def create_app() -> Boundary:
     @mcp.tool()
     def read_artifact(artifact_id: str, offset: int = 0, limit: int = 4096) -> dict[str, Any]:
         """Read a lossless page with digest, byte cursor, line range, and end marker."""
-        run = service.active()
         if offset < 0 or not 1 <= limit <= 16384:
             raise PolicyError("Invalid artifact read bounds")
-        return store.artifact_page(run, artifact_id, offset, limit)
+        return service.read_artifact(artifact_id, offset, limit)
 
     @mcp.tool()
     def update_hypothesis(hypothesis: Hypothesis) -> dict[str, Any]:
@@ -177,6 +176,10 @@ def create_app() -> Boundary:
     async def start() -> dict[str, str]:
         return {"investigation_id": service.begin(mode)}
 
+    @api.post("/admin/runs/{run_id}/continue")
+    async def continue_investigation(run_id: str) -> dict[str, str]:
+        return {"investigation_id": service.begin(mode, parent_id=run_id)}
+
     @api.get("/admin/readiness")
     async def readiness() -> dict[str, Any]:
         try:
@@ -190,6 +193,13 @@ def create_app() -> Boundary:
         service.cancel()
         return {"status": "cancelled"}
 
+    @api.post("/admin/runs/{run_id}/close")
+    async def close_investigation(run_id: str) -> dict[str, Any]:
+        try:
+            return service.close_run(run_id)
+        except ValueError as error:
+            raise HTTPException(404, "Unknown investigation") from error
+
     @api.get("/admin/state")
     async def state() -> dict[str, Any]:
         current = service.state()
@@ -198,7 +208,7 @@ def create_app() -> Boundary:
     @api.get("/admin/runs/{run_id}")
     async def stored_run(run_id: str) -> dict[str, Any]:
         try:
-            return {**store.state(run_id), "events": store.events(run_id)}
+            return {**service.stored_state(run_id), "events": store.events(run_id)}
         except ValueError as error:
             raise HTTPException(404, "Unknown investigation") from error
 
@@ -211,7 +221,7 @@ def create_app() -> Boundary:
             raise HTTPException(409, "No investigation")
         state = service.state()
         if (
-            state["status"] in {"cancelled", "failed", "interrupted"}
+            state["status"] in {"cancelled", "closed", "failed", "interrupted"}
             or state["remaining_seconds"] <= 0
         ):
             raise HTTPException(409, "Investigation closed")

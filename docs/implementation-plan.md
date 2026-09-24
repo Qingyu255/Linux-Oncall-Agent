@@ -100,7 +100,7 @@ R05 is met; repeated model-quality trials required by R16 remain open. See
 
 ## Optional Day 5 — Baselines and usability
 
-Add Codex with the same MCP capabilities, then compare it with stock DSH using identical scenario seeds and budgets. Add background worker/status/attach only after core reliability passes: persist worker PID and start identity, own stdout/stderr, handle terminal exit, reap children, detect stale leases and support cancellation. Do not use bare `fork()` as a substitute for lifecycle design.
+Add Codex with the same MCP capabilities, then compare it with stock DSH using identical scenario seeds and budgets. Explicit parent-linked continuation is implemented with historical/current evidence scopes, target/boot checks, TTL, lineage bounds, and immutable reports. Detached background worker/attach remains after core reliability: persist worker PID and start identity, own stdout/stderr, handle terminal exit, reap children, and detect stale leases. Do not use bare `fork()` as a substitute for lifecycle design.
 
 ## Optional Day 6 — One justified extension
 

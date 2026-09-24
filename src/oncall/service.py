@@ -2,9 +2,18 @@
 
 import asyncio
 import time
+from datetime import datetime
 from typing import Any, Protocol
 
-from oncall.domain import Evidence, Hypothesis, Observation, PolicyError, ProbeRequest, Report
+from oncall.domain import (
+    Evidence,
+    Hypothesis,
+    Observation,
+    PolicyError,
+    ProbeRequest,
+    Report,
+    utcnow,
+)
 from oncall.storage import EvidenceStore
 
 
@@ -14,27 +23,68 @@ class TargetClient(Protocol):
 
 class InvestigationService:
     def __init__(
-        self, target: TargetClient, store: EvidenceStore, max_calls: int = 20, timeout: float = 180
+        self,
+        target: TargetClient,
+        store: EvidenceStore,
+        max_calls: int = 20,
+        timeout: float = 180,
+        continuation_ttl_seconds: float = 24 * 60 * 60,
     ) -> None:
         self.target, self.store = target, store
         self.max_calls, self.timeout = max_calls, timeout
+        self.continuation_ttl_seconds = continuation_ttl_seconds
         self.run_id: str | None = None
         self.deadline = 0.0
         self.calls, self.bytes = 0, 0
         self.tasks: set[asyncio.Task[Any]] = set()
         self.slots = asyncio.Semaphore(2)
+        self.identity_checked = False
 
-    def begin(self, mode: str) -> str:
+    def begin(self, mode: str, parent_id: str | None = None) -> str:
         if self.run_id and self.store.state(self.run_id)["status"] == "running":
             raise PolicyError("An investigation is already running")
         if self.tasks:
             raise PolicyError("Previous probes are still stopping")
-        self.run_id = self.store.create_run(mode)
+        parent_state: dict[str, Any] | None = None
+        if parent_id is not None:
+            try:
+                parent_state = self.store.state(parent_id)
+            except ValueError as error:
+                raise PolicyError("Unknown parent investigation") from error
+            if parent_state["status"] == "running":
+                raise PolicyError("Parent investigation is still running")
+            anchor = parent_state["finished_at"] or parent_state["started_at"]
+            age = (utcnow() - datetime.fromisoformat(anchor)).total_seconds()
+            if age > self.continuation_ttl_seconds:
+                raise PolicyError("Parent investigation is outside the continuation TTL")
+            try:
+                if len(self.store.ancestors(parent_id)) >= 5:
+                    raise PolicyError("Investigation continuation depth exceeded")
+            except ValueError as error:
+                raise PolicyError(str(error)) from error
+        self.run_id = self.store.create_run(mode, parent_id)
         self.calls, self.bytes = 0, 0
+        self.identity_checked = False
         self.deadline = time.monotonic() + self.timeout
         self.store.event(
-            self.run_id, "started", {"max_calls": self.max_calls, "timeout_seconds": self.timeout}
+            self.run_id,
+            "started",
+            {
+                "max_calls": self.max_calls,
+                "timeout_seconds": self.timeout,
+                "parent_investigation_id": parent_id,
+            },
         )
+        if parent_state is not None:
+            self.store.event(
+                self.run_id,
+                "continued_from",
+                {
+                    "parent_investigation_id": parent_id,
+                    "parent_status": parent_state["status"],
+                    "continuation_ttl_seconds": self.continuation_ttl_seconds,
+                },
+            )
         return self.run_id
 
     def active(self) -> str:
@@ -60,6 +110,7 @@ class InvestigationService:
                     self.active()
                     observation = await self.target.collect(request)
             self.active()
+            self._validate_continuation_identity(run, observation)
             captured = len(observation.raw.encode("utf-8"))
             if self.bytes + captured > 10 * 1024 * 1024:
                 raise PolicyError("Investigation artifact budget exceeded")
@@ -75,7 +126,8 @@ class InvestigationService:
 
     def update_hypothesis(self, hypothesis: Hypothesis) -> Hypothesis:
         run = self.active()
-        known = {item.evidence_id for item in self.store.evidence(run)}
+        current, historical = self.store.scoped_evidence(run)
+        known = {item.evidence_id for item in (*current, *historical)}
         references = set(hypothesis.supporting_evidence_ids) | set(
             hypothesis.contradicting_evidence_ids
         )
@@ -91,33 +143,58 @@ class InvestigationService:
 
     def submit(self, report: Report) -> dict[str, Any]:
         run = self.active()
-        evidence = {x.evidence_id: x for x in self.store.evidence(run)}
+        current_items, historical_items = self.store.scoped_evidence(run)
+        current = {item.evidence_id: item for item in current_items}
+        historical = {item.evidence_id: item for item in historical_items}
+        all_evidence = {**historical, **current}
         for claim in report.claims:
-            if any(ref not in evidence for ref in claim.evidence_ids):
-                raise PolicyError("Report cites unknown or foreign evidence")
+            scope = current if claim.evidence_scope == "current" else historical
+            if any(ref not in scope for ref in claim.evidence_ids):
+                raise PolicyError(
+                    f"{claim.evidence_scope.title()} claim cites evidence outside that scope"
+                )
             if report.outcome == "completed" and not claim.fact_fields:
                 raise PolicyError("Completed findings must name cited fact fields")
             available_fields: set[str] = set()
             for ref in claim.evidence_ids:
-                facts = evidence[ref].facts
+                facts = scope[ref].facts
                 if facts is not None:
                     available_fields.update(facts.model_dump())
             if any(field not in available_fields for field in claim.fact_fields):
                 raise PolicyError("Report cites a fact field absent from its cited evidence")
-        boot_ids = {x.boot_id for x in evidence.values()}
+            targets = {scope[ref].target_id for ref in claim.evidence_ids}
+            if len(targets) > 1:
+                raise PolicyError("One claim cites evidence from multiple targets")
+        boot_ids = {item.boot_id for item in current.values()}
         if len(boot_ids) > 1:
             raise PolicyError("Target boot identity changed; start a fresh investigation")
-        target_ids = {x.target_id for x in evidence.values()}
+        target_ids = {item.target_id for item in current.values()}
         if len(target_ids) > 1:
             raise PolicyError("Evidence spans multiple targets")
         cited = {ref for claim in report.claims for ref in claim.evidence_ids}
         if report.outcome == "completed" and any(
-            item.status != "ok" and item.evidence_id in cited for item in evidence.values()
+            item.status != "ok" and item.evidence_id in cited for item in all_evidence.values()
         ):
             raise PolicyError("Completed report relies on limited or unavailable evidence")
         self.store.finish(run, report.outcome, report)
         self.store.event(run, "report_accepted", {"outcome": report.outcome})
         return {"accepted": True, "investigation_id": run, "outcome": report.outcome}
+
+    def read_artifact(self, artifact_id: str, offset: int, limit: int) -> dict[str, Any]:
+        run = self.active()
+        return self.store.scoped_artifact_page(run, artifact_id, offset, limit)
+
+    def close_run(self, run: str) -> dict[str, Any]:
+        state = self.store.state(run)
+        if state["status"] != "running":
+            return state
+        if run != self.run_id:
+            raise PolicyError("Investigation is not active in this broker")
+        self.store.finish(run, "closed")
+        self.store.event(run, "closed", {})
+        for task in list(self.tasks):
+            task.cancel()
+        return self.store.state(run)
 
     def cancel(self) -> None:
         if self.run_id and self.store.state(self.run_id)["status"] == "running":
@@ -129,10 +206,46 @@ class InvestigationService:
     def state(self) -> dict[str, Any]:
         if not self.run_id:
             raise PolicyError("No investigation")
-        return {
-            **self.store.state(self.run_id),
+        state = {
+            **self.stored_state(self.run_id),
             "probe_calls": self.calls,
             "captured_bytes": self.bytes,
             "remaining_capture_bytes": max(0, 10 * 1024 * 1024 - self.bytes),
             "remaining_seconds": max(0, self.deadline - time.monotonic()),
         }
+        return state
+
+    def stored_state(self, run: str) -> dict[str, Any]:
+        state = self.store.state(run)
+        context = self.store.continuation_context(run)
+        if context is not None:
+            state["continuation"] = context
+        return state
+
+    def _validate_continuation_identity(self, run: str, observation: Observation) -> None:
+        if self.identity_checked:
+            return
+        expected = self.store.latest_ancestor_identity(run)
+        if expected is None:
+            self.identity_checked = True
+            return
+        target_id, boot_id = expected
+        if observation.target_id != target_id:
+            self.store.event(
+                run,
+                "target_identity_mismatch",
+                {"expected_target_id": target_id, "observed_target_id": observation.target_id},
+            )
+            raise PolicyError("Continuation target identity does not match parent evidence")
+        relationship = "same_boot" if observation.boot_id == boot_id else "rebooted"
+        self.store.event(
+            run,
+            "target_identity_checked",
+            {
+                "target_id": target_id,
+                "parent_boot_id": boot_id,
+                "current_boot_id": observation.boot_id,
+                "relationship": relationship,
+            },
+        )
+        self.identity_checked = True

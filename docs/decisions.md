@@ -107,3 +107,19 @@ and unavailable controls may validly contain no observation if their report is i
 **Tradeoff:** final evaluation needs human review and cannot collapse to one automatic number. That
 cost keeps claims auditable and makes missing live-model trials visible instead of treating substrate
 reliability as reasoning success.
+
+## ADR-013 — Continue incidents through explicit child runs
+
+**Context:** operators need to ask follow-up questions, but silently reusing a harness conversation can
+mix stale measurements, different target boots, and unrelated incidents. Reopening an accepted report
+would also weaken reproducibility and auditability.
+
+**Decision:** `investigate` always creates a fresh root run. `continue <run-id>` creates a new child run
+within a 24-hour TTL and a five-generation lineage bound. The child reconstructs context from trusted
+reports, hypotheses, and evidence. Prior evidence is labeled historical with its age. Retrospective
+claims cite historical evidence; claims about current conditions require fresh child evidence. The
+first new observation must match the parent target and records same-boot versus rebooted status.
+
+**Tradeoff:** continuation spends a new model session and does not reproduce every hidden token from
+the old transcript. In return, the operational context is explicit, bounded, inspectable, and tied to
+the evidence that actually supports the answer.

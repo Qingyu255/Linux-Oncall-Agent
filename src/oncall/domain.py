@@ -263,6 +263,7 @@ class Claim(Value):
     text: str = Field(min_length=1, max_length=2000)
     evidence_ids: tuple[str, ...] = Field(min_length=1, max_length=20)
     fact_fields: tuple[str, ...] = Field(default=(), max_length=20)
+    evidence_scope: Literal["current", "historical"] = "current"
 
 
 class Report(Value):

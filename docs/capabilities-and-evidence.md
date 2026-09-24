@@ -61,7 +61,12 @@ Raw data stays in the trusted store with restrictive permissions. Sanitization p
 
 A hypothesis has ID, claim, qualitative status (`open`, `supported`, `weakened`, `rejected`), supporting/contradicting evidence IDs and unresolved questions. Numeric confidence is deferred until calibrated. An evidence reference proves provenance, not causality.
 
-Final report fields: target/interval, outcome, primary finding, supporting citations, alternative explanations, limitations, next recommended probes/actions, and run metrics. Findings cite evidence ID plus field or sanitized artifact line range. Unsupported reference IDs and cross-investigation citations fail validation. Semantic support is evaluated separately by the rubric.
+Final report fields: target/interval, outcome, primary finding, supporting citations, alternative explanations, limitations, next recommended probes/actions, and run metrics. Findings cite evidence ID plus field or sanitized artifact line range. Each claim declares `evidence_scope` as `current` or `historical`. A current claim can cite only evidence collected by that run. A historical claim can cite only evidence from its explicit parent lineage. Unsupported references and unrelated cross-investigation citations fail validation. Semantic support is evaluated separately by the rubric.
+
+An explicit continuation is a new child investigation. Its state includes the parent report,
+hypotheses, historical evidence, source run IDs, and evidence ages. The first current observation must
+match the parent target identity; a different boot is accepted only as a recorded reboot boundary.
+Accepted parent reports remain immutable.
 
 ## Retention and limits
 

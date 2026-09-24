@@ -65,6 +65,15 @@ def client() -> httpx.Client:
     )
 
 
+def evidence_view(state: dict[str, Any]) -> list[dict[str, Any]]:
+    current = [{**item, "evidence_scope": "current"} for item in state.get("evidence", [])]
+    continuation = state.get("continuation")
+    historical = (
+        continuation.get("historical_evidence", []) if isinstance(continuation, dict) else []
+    )
+    return [*current, *historical]
+
+
 def render(state: dict[str, Any]) -> str:
     lines = [
         "# Linux OnCall investigation",
@@ -74,20 +83,25 @@ def render(state: dict[str, Any]) -> str:
         f"Provider mode: **{state['mode']}**",
         "",
     ]
+    parent = state.get("parent_investigation_id")
+    if parent:
+        lines.insert(4, f"Parent run: `{parent}`")
     report = state.get("report")
     if report:
         lines += [report["summary"], "", "## Findings", ""]
         for claim in report["claims"]:
             refs = ", ".join(f"`{ref}`" for ref in claim["evidence_ids"])
-            lines.append(f"- {claim['text']} Evidence: {refs}")
+            scope = claim.get("evidence_scope", "current")
+            lines.append(f"- [{scope}] {claim['text']} Evidence: {refs}")
         for field in ("alternatives", "limitations", "next_steps"):
             lines += ["", f"## {field.replace('_', ' ').title()}", ""]
             lines += [f"- {item}" for item in report[field]]
-    lines += ["", "## Captured evidence", ""]
-    for evidence in state["evidence"]:
+    lines += ["", "## Evidence", ""]
+    for evidence in evidence_view(state):
         lines += [
             f"### {evidence['evidence_id']}",
             "",
+            f"Scope: `{evidence.get('evidence_scope', 'current')}`",
             f"Target: `{evidence['target_id']}`; boot: `{evidence['boot_id']}`",
             f"Interval: {evidence['started_at']} to {evidence['completed_at']}",
             f"Quality: `{evidence['status']}`; error: `{evidence['error_code'] or 'none'}`",
@@ -118,6 +132,8 @@ def show_result(
     metadata.add_column(style="dim")
     metadata.add_column(style="bold")
     metadata.add_row("Run", str(state["investigation_id"]))
+    if state.get("parent_investigation_id"):
+        metadata.add_row("Parent", str(state["parent_investigation_id"]))
     metadata.add_row("Provider", str(state["mode"]))
     metadata.add_row("Outcome", str(report["outcome"]))
     metadata.add_row("Elapsed", f"{elapsed_seconds:.1f}s")
@@ -132,15 +148,18 @@ def show_result(
     for index, claim in enumerate(report["claims"], start=1):
         references = ", ".join(str(item)[:8] for item in claim["evidence_ids"])
         console.print(f"  [bold cyan]{index}.[/] {escape(str(claim['text']))}")
-        console.print(f"     [dim]Evidence: {references}[/]")
+        scope = str(claim.get("evidence_scope", "current"))
+        console.print(f"     [dim]Evidence ({scope}): {references}[/]")
 
-    evidence_table = Table(title="Captured evidence", header_style="bold magenta")
+    evidence_table = Table(title="Investigation evidence", header_style="bold magenta")
+    evidence_table.add_column("Scope")
     evidence_table.add_column("Probe")
     evidence_table.add_column("Quality")
     evidence_table.add_column("Bytes", justify="right")
     evidence_table.add_column("Evidence ID")
-    for evidence in state["evidence"]:
+    for evidence in evidence_view(state):
         evidence_table.add_row(
+            str(evidence.get("evidence_scope", "current")),
             str(evidence["request"]["name"]),
             str(evidence["status"]),
             f"{int(evidence['artifact_bytes']):,}",
@@ -254,6 +273,45 @@ def handle_harness_line(line: str, started: float) -> None:
         show_progress(event, started)
 
 
+def execute_investigation(
+    connection: httpx.Client,
+    run: str,
+    prompt: str,
+    display_message: str,
+    parent_id: str | None = None,
+) -> None:
+    heading = f"[bold]Run[/] {run}"
+    if parent_id is not None:
+        heading += f"\n[bold]Parent[/] {parent_id}"
+    console.print(Panel.fit(f"{heading}\n[dim]{escape(display_message)}[/]", title="Linux OnCall"))
+    started = time.monotonic()
+    try:
+        console.print("\n[bold]Investigation progress[/]")
+        return_code = run_harness(run, prompt, started)
+        if return_code:
+            raise RuntimeError(f"Harness exited with {return_code}")
+        state = connection.get("/admin/state").raise_for_status().json()
+        if state["status"] == "running":
+            raise RuntimeError("Harness returned without an accepted report")
+        json_path = save_state(state)
+        report_path = json_path.with_name("report.md")
+        report_path.write_text(render(state))
+        show_result(state, report_path, json_path, time.monotonic() - started)
+    except BaseException as error:
+        connection.post("/admin/cancel")
+        state = connection.get("/admin/state").raise_for_status().json()
+        failure_path = save_state(state, "failed-state.json")
+        console.print(
+            Panel(
+                f"{escape(str(error))}{failure_detail(state)}\n\n"
+                f"Audit state: {display_path(failure_path)}",
+                title="[bold red]Investigation failed[/]",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(1) from error
+
+
 @app.command()
 def doctor() -> None:
     """Check broker availability and disclose fixture versus live provider mode."""
@@ -282,41 +340,36 @@ def investigate(
         response = connection.post("/admin/start")
         response.raise_for_status()
         run = response.json()["investigation_id"]
-        console.print(
-            Panel.fit(f"[bold]Run[/] {run}\n[dim]{escape(symptom)}[/]", title="Linux OnCall")
+        execute_investigation(connection, run, symptom, symptom)
+
+
+@app.command("continue")
+def continue_investigation(
+    run_id: str,
+    message: Annotated[str, typer.Option("--message", "-m")],
+) -> None:
+    """Create an audited child run using prior evidence as historical context."""
+    with client() as connection:
+        response = connection.post(f"/admin/runs/{run_id}/continue")
+        response.raise_for_status()
+        run = response.json()["investigation_id"]
+        prompt = (
+            f"This is an explicit follow-up to investigation {run_id}. "
+            "First call get_investigation_state. Prior-run evidence is historical. "
+            "Use evidence_scope='historical' only for retrospective claims. "
+            "For any claim about current target conditions, collect fresh evidence in this child "
+            "investigation and use evidence_scope='current'. "
+            f"Operator follow-up: {message}"
         )
-        started = time.monotonic()
-        try:
-            console.print("\n[bold]Investigation progress[/]")
-            return_code = run_harness(run, symptom, started)
-            if return_code:
-                raise RuntimeError(f"Harness exited with {return_code}")
-            state = connection.get("/admin/state").raise_for_status().json()
-            if state["status"] == "running":
-                raise RuntimeError("Harness returned without an accepted report")
-            json_path = save_state(state)
-            report_path = json_path.with_name("report.md")
-            report_path.write_text(render(state))
-            show_result(state, report_path, json_path, time.monotonic() - started)
-        except BaseException as error:
-            connection.post("/admin/cancel")
-            state = connection.get("/admin/state").raise_for_status().json()
-            failure_path = save_state(state, "failed-state.json")
-            console.print(
-                Panel(
-                    f"{escape(str(error))}{failure_detail(state)}\n\n"
-                    f"Audit state: {display_path(failure_path)}",
-                    title="[bold red]Investigation failed[/]",
-                    border_style="red",
-                )
-            )
-            raise typer.Exit(1) from error
+        execute_investigation(connection, run, prompt, message, parent_id=run_id)
 
 
 @app.command()
-def status() -> None:
+def status(run_id: Annotated[str | None, typer.Argument()] = None) -> None:
+    """Show the current investigation or one stored run by ID."""
     with client() as connection:
-        typer.echo(json.dumps(connection.get("/admin/state").raise_for_status().json(), indent=2))
+        path = f"/admin/runs/{run_id}" if run_id else "/admin/state"
+        typer.echo(json.dumps(connection.get(path).raise_for_status().json(), indent=2))
 
 
 @app.command()
@@ -325,6 +378,14 @@ def cancel() -> None:
     with client() as connection:
         connection.post("/admin/cancel").raise_for_status()
     typer.echo("Investigation cancelled")
+
+
+@app.command()
+def close(run_id: str) -> None:
+    """Close an active run by ID; accepted reports remain immutable."""
+    with client() as connection:
+        state = connection.post(f"/admin/runs/{run_id}/close").raise_for_status().json()
+    typer.echo(f"Investigation {run_id}: {state['status']}")
 
 
 @app.command("lab-start")

@@ -412,7 +412,7 @@ directory:
 
 | Storage | Mutability | Purpose |
 |---|---|---|
-| `runs` | Status and final report transition | Investigation identity and terminal outcome |
+| `runs` | Status and final report transition | Investigation identity, parent link, timestamps, and immutable terminal outcome |
 | `evidence` | Append-only | Typed evidence metadata and artifact reference |
 | `events` | Append-only | Ordered audit trail of policy and lifecycle events |
 | `hypotheses` | Append-only versions | Current and historical diagnostic interpretation |
@@ -424,16 +424,24 @@ stateDiagram-v2
     running --> completed: accepted completed report
     running --> inconclusive: accepted inconclusive report or deadline
     running --> cancelled: operator or CLI failure cancellation
+    running --> closed: explicit close
     running --> interrupted: broker restarts during a run
+    completed --> child: continue parent
+    inconclusive --> child: continue parent
+    child --> running: new observation window
     completed --> [*]
     inconclusive --> [*]
     cancelled --> [*]
+    closed --> [*]
     interrupted --> [*]
 ```
 
 On broker startup, any previously `running` row becomes `interrupted`; stale authority is never
-silently resumed. A report may use evidence only from one run, target, and boot. A completed report
-cannot rely on limited, denied, or unsupported evidence.
+silently resumed. `oncall continue` creates a child run within 24 hours and at most five generations;
+it never reopens an accepted report. Prior evidence includes its age and historical scope. Current
+claims require child evidence, while retrospective claims may cite the parent lineage. The first new
+probe enforces the same target identity and records same-boot versus rebooted status. A completed
+report cannot rely on limited, denied, or unsupported evidence.
 
 ## Level 10: fault lab and evaluation
 

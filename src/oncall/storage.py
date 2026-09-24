@@ -28,7 +28,8 @@ class EvidenceStore:
             self.db.execute("PRAGMA foreign_keys=ON")
             self.db.executescript("""
               CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, status TEXT NOT NULL,
-                started TEXT NOT NULL, mode TEXT NOT NULL, report TEXT);
+                started TEXT NOT NULL, mode TEXT NOT NULL, report TEXT,
+                parent_id TEXT REFERENCES runs(id), finished TEXT);
               CREATE TABLE IF NOT EXISTS evidence(id TEXT PRIMARY KEY, run_id TEXT NOT NULL
                 REFERENCES runs(id), artifact_id TEXT UNIQUE NOT NULL, payload TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY, run_id TEXT NOT NULL
@@ -37,18 +38,64 @@ class EvidenceStore:
                 id TEXT NOT NULL, version INTEGER NOT NULL, payload TEXT NOT NULL,
                 PRIMARY KEY(run_id,id,version));
             """)
+            columns = {row[1] for row in self.db.execute("PRAGMA table_info(runs)")}
+            if "parent_id" not in columns:
+                self.db.execute("ALTER TABLE runs ADD COLUMN parent_id TEXT REFERENCES runs(id)")
+            if "finished" not in columns:
+                self.db.execute("ALTER TABLE runs ADD COLUMN finished TEXT")
             # Recovery never silently resumes stale authority.
-            self.db.execute("UPDATE runs SET status='interrupted' WHERE status='running'")
+            self.db.execute(
+                "UPDATE runs SET status='interrupted',finished=? WHERE status='running'",
+                (utcnow().isoformat(),),
+            )
             self.db.commit()
 
-    def create_run(self, mode: str) -> str:
+    def create_run(self, mode: str, parent_id: str | None = None) -> str:
         run = uuid.uuid4().hex
         with self.lock, self.db:
+            if parent_id is not None:
+                parent = self.db.execute("SELECT 1 FROM runs WHERE id=?", (parent_id,)).fetchone()
+                if parent is None:
+                    raise ValueError("Unknown parent investigation")
             self.db.execute(
-                "INSERT INTO runs VALUES (?, 'running', ?, ?, NULL)",
-                (run, utcnow().isoformat(), mode),
+                "INSERT INTO runs(id,status,started,mode,report,parent_id,finished) "
+                "VALUES (?, 'running', ?, ?, NULL, ?, NULL)",
+                (run, utcnow().isoformat(), mode, parent_id),
             )
         return run
+
+    def ancestors(self, run: str, maximum: int = 5) -> tuple[str, ...]:
+        """Return direct parent first, rejecting corrupt or excessively deep lineage."""
+        values: list[str] = []
+        current = run
+        with self.lock:
+            for _ in range(maximum + 1):
+                row = self.db.execute(
+                    "SELECT parent_id FROM runs WHERE id=?", (current,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Unknown investigation")
+                parent = row[0]
+                if parent is None:
+                    return tuple(values)
+                if parent in values or parent == run:
+                    raise ValueError("Investigation lineage cycle")
+                values.append(parent)
+                current = parent
+        raise ValueError("Investigation lineage exceeds limit")
+
+    def scoped_evidence(self, run: str) -> tuple[list[Evidence], list[Evidence]]:
+        current = self.evidence(run)
+        historical = [item for ancestor in self.ancestors(run) for item in self.evidence(ancestor)]
+        return current, historical
+
+    def latest_ancestor_identity(self, run: str) -> tuple[str, str] | None:
+        for ancestor in self.ancestors(run):
+            evidence = self.evidence(ancestor)
+            if evidence:
+                latest = evidence[-1]
+                return latest.target_id, latest.boot_id
+        return None
 
     def event(self, run: str, kind: str, payload: dict[str, Any]) -> None:
         with self.lock, self.db:
@@ -145,6 +192,19 @@ class EvidenceStore:
             "text": text,
         }
 
+    def scoped_artifact_page(
+        self, run: str, artifact: str, offset: int, limit: int
+    ) -> dict[str, Any]:
+        owners = (run, *self.ancestors(run))
+        with self.lock:
+            row = self.db.execute(
+                "SELECT run_id FROM evidence WHERE artifact_id=?", (artifact,)
+            ).fetchone()
+        if row is None or row[0] not in owners:
+            raise ValueError("Artifact does not belong to investigation lineage")
+        page = self.artifact_page(str(row[0]), artifact, offset, limit)
+        return {**page, "evidence_scope": "current" if row[0] == run else "historical"}
+
     def artifact(self, run: str, artifact: str, offset: int, limit: int) -> str:
         """Compatibility helper for trusted callers that only need page text."""
         return str(self.artifact_page(run, artifact, offset, limit)["text"])
@@ -180,15 +240,17 @@ class EvidenceStore:
 
     def finish(self, run: str, status: str, report: Report | None = None) -> None:
         with self.lock, self.db:
-            self.db.execute(
-                "UPDATE runs SET status=?,report=? WHERE id=?",
-                (status, report.model_dump_json() if report else None, run),
+            result = self.db.execute(
+                "UPDATE runs SET status=?,report=?,finished=? WHERE id=? AND status='running'",
+                (status, report.model_dump_json() if report else None, utcnow().isoformat(), run),
             )
+            if result.rowcount != 1:
+                raise ValueError("Investigation is already terminal")
 
     def state(self, run: str) -> dict[str, Any]:
         with self.lock:
             row = self.db.execute(
-                "SELECT status,mode,report FROM runs WHERE id=?", (run,)
+                "SELECT status,mode,report,parent_id,started,finished FROM runs WHERE id=?", (run,)
             ).fetchone()
         if row is None:
             raise ValueError("Unknown investigation")
@@ -197,8 +259,53 @@ class EvidenceStore:
             "status": row[0],
             "mode": row[1],
             "report": json.loads(row[2]) if row[2] else None,
+            "parent_investigation_id": row[3],
+            "started_at": row[4],
+            "finished_at": row[5],
             "evidence": [x.model_dump(mode="json") for x in self.evidence(run)],
             "hypotheses": [x.model_dump(mode="json") for x in self.hypotheses(run)],
+        }
+
+    def continuation_context(self, run: str) -> dict[str, Any] | None:
+        ancestors = self.ancestors(run)
+        if not ancestors:
+            return None
+        now = utcnow()
+        historical: list[dict[str, Any]] = []
+        parents: list[dict[str, Any]] = []
+        for ancestor in ancestors:
+            state = self.state(ancestor)
+            parents.append(
+                {
+                    "investigation_id": ancestor,
+                    "status": state["status"],
+                    "started_at": state["started_at"],
+                    "finished_at": state["finished_at"],
+                    "report": state["report"],
+                    "hypotheses": state["hypotheses"],
+                }
+            )
+            for evidence in self.evidence(ancestor):
+                age = max(0.0, (now - evidence.completed_at).total_seconds())
+                historical.append(
+                    {
+                        **evidence.model_dump(mode="json"),
+                        "source_investigation_id": ancestor,
+                        "evidence_scope": "historical",
+                        "age_seconds": round(age, 3),
+                    }
+                )
+        current = self.evidence(run)
+        expected = self.latest_ancestor_identity(run)
+        relationship = "unverified"
+        if current and expected:
+            latest = current[-1]
+            relationship = "same_boot" if latest.boot_id == expected[1] else "rebooted"
+        return {
+            "parent_investigation_id": ancestors[0],
+            "lineage": parents,
+            "historical_evidence": historical,
+            "target_relationship": relationship,
         }
 
     def close(self) -> None:
