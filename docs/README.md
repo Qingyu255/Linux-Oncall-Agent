@@ -36,6 +36,12 @@ The live DSH/API path is verified with accepted `gpt-4.1-mini` and `gpt-5.6-terr
 deterministic evidence gates; the mini report failed causal review and the Terra report passed. The
 next gate is to run and human-score the full matrix; substrate passes are not diagnostic-quality passes.
 
+`oncall investigate` streams a safe progress timeline from DeepSeek Harness while it runs. The SDK's
+notification callback is projected into lifecycle and bounded-tool milestones such as CPU sampling,
+process ranking, hypothesis updates, and report submission. Model reasoning, prompts, tool arguments,
+raw evidence, and provider credentials are excluded from this terminal channel; complete admitted
+evidence remains in the final JSON and Markdown reports.
+
 Four focused days is an aggressive target, approximately 24–32 engineering hours, assuming AWS access and a working model credential. Reserve two more days for integration surprises and presentation preparation. Scope should shrink before the execution boundary or evidence quality does.
 
 ## Assumptions to validate in Phase 0

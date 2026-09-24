@@ -49,6 +49,12 @@ The agent receives only a short-lived investigation-scoped token. AWS credential
 
 A thin runner inside the agent container launches the DSH SDK and its child runtime there. The trusted controller dispatches jobs and cancellation to that runner through the scoped control channel; it does not launch a harness subprocess in the credential-bearing controller container. The runner's results remain untrusted proposals until broker validation. For the first release, the operator starts the container pair and stops/replaces the agent container if graceful cancellation fails.
 
+The runner also consumes DSH's session notification callback and projects it onto a versioned JSONL
+progress channel for the operator CLI. Only lifecycle state, allowlisted oncall tool names, success or
+failure, retries, and the turn finish reason cross this channel. Prompts, reasoning blocks, tool
+arguments, tool results, and unknown tool names are discarded inside the agent container. This stream
+is presentation data; persisted broker events and admitted evidence remain authoritative.
+
 ## Remote request flow
 
 MCP is the harness-facing adapter. The target uses a simpler versioned HTTPS API over an SSM tunnel. This keeps MCP and harness lifecycle concerns off the degraded machine. Pin a target certificate in the broker and authenticate requests with a rotated per-target token; SSM is transport access control, not a substitute for application authorization.

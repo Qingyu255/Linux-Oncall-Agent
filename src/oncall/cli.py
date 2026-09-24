@@ -1,6 +1,7 @@
 """Operator CLI. Docker authority is here, never exposed as an agent tool."""
 
 import json
+import selectors
 import subprocess
 import time
 from dataclasses import asdict
@@ -16,6 +17,7 @@ from rich.table import Table
 from rich.text import Text
 
 from oncall.faults import SCENARIOS, FaultController, SsmOperatorExecutor
+from oncall.harness_progress import PROGRESS_PROTOCOL, progress_message
 
 app = typer.Typer(help="Linux OnCall Agent local lab")
 ROOT = Path(__file__).resolve().parents[2]
@@ -173,6 +175,85 @@ def save_state(state: dict[str, Any], filename: str = "report.json") -> Path:
     return path
 
 
+def show_progress(event: dict[str, Any], started: float) -> None:
+    """Render one safe event produced by the sandbox progress adapter."""
+    rendered = progress_message(event)
+    if rendered is None:
+        return
+    style, message = rendered
+    elapsed = time.monotonic() - started
+    console.print(f"[dim]{elapsed:6.1f}s[/] [{style}]●[/] {escape(message)}")
+
+
+def run_harness(run: str, symptom: str, started: float, timeout: float = 175) -> int:
+    """Stream the runner's JSONL protocol while retaining an outer hard deadline."""
+    command = [
+        "docker",
+        "compose",
+        "run",
+        "--rm",
+        "--no-deps",
+        "agent",
+        "--session-id",
+        run,
+        "--symptom",
+        symptom,
+    ]
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+    )
+    if process.stdout is None:  # pragma: no cover - Popen guarantees it for PIPE
+        process.kill()
+        raise RuntimeError("Harness output pipe was not created")
+    deadline = time.monotonic() + timeout
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+    try:
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise TimeoutError(f"Harness exceeded {timeout:.0f} seconds")
+            for _key, _ in selector.select(timeout=min(0.25, remaining)):
+                line = process.stdout.readline()
+                if line:
+                    handle_harness_line(line, started)
+        for line in process.stdout:
+            handle_harness_line(line, started)
+        return process.wait()
+    finally:
+        selector.close()
+        process.stdout.close()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
+def handle_harness_line(line: str, started: float) -> None:
+    """Accept only the explicit progress protocol; discard runtime diagnostics."""
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
+        show_progress(event, started)
+
+
 @app.command()
 def doctor() -> None:
     """Check broker availability and disclose fixture versus live provider mode."""
@@ -206,31 +287,10 @@ def investigate(
         )
         started = time.monotonic()
         try:
-            with console.status(
-                "[bold cyan]Agent is collecting bounded evidence and testing hypotheses…[/]",
-                spinner="dots",
-            ):
-                result = subprocess.run(
-                    [
-                        "docker",
-                        "compose",
-                        "run",
-                        "--rm",
-                        "--no-deps",
-                        "agent",
-                        "--session-id",
-                        run,
-                        "--symptom",
-                        symptom,
-                    ],
-                    cwd=ROOT,
-                    timeout=175,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
-            if result.returncode:
-                raise RuntimeError(f"Harness exited with {result.returncode}")
+            console.print("\n[bold]Investigation progress[/]")
+            return_code = run_harness(run, symptom, started)
+            if return_code:
+                raise RuntimeError(f"Harness exited with {return_code}")
             state = connection.get("/admin/state").raise_for_status().json()
             if state["status"] == "running":
                 raise RuntimeError("Harness returned without an accepted report")

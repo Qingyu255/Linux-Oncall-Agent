@@ -9,7 +9,13 @@ from pathlib import Path
 
 from deepseek_harness import DeepSeekHarness  # type: ignore[import-untyped]
 
+from oncall.harness_progress import PROGRESS_PROTOCOL, HarnessProgressAdapter
 from oncall.http_boundary import secret_file
+
+
+def emit(value: dict[str, object]) -> None:
+    """Write one flushed protocol record for the parent CLI."""
+    print(json.dumps(value, separators=(",", ":")), flush=True)
 
 
 def main() -> None:
@@ -49,16 +55,24 @@ def main() -> None:
     timer.start()
     try:
         with harness:
-            result = harness.run(args.symptom, session_id=args.session_id)
-            print(
-                json.dumps(
-                    {
-                        "session_id": result.session_id,
-                        "finish_reason": result.finish_reason,
-                        "final_response": result.final_response,
-                    }
-                )
+            emit({"protocol": PROGRESS_PROTOCOL, "kind": "harness_started"})
+            progress = HarnessProgressAdapter(emit)
+            result = harness.run(
+                args.symptom,
+                session_id=args.session_id,
+                on_notification=lambda item: progress.notification(item.method, item.payload),
             )
+            emit(
+                {
+                    "protocol": PROGRESS_PROTOCOL,
+                    "kind": "result",
+                    "session_id": result.session_id,
+                    "finish_reason": result.finish_reason,
+                }
+            )
+    except Exception:
+        emit({"protocol": PROGRESS_PROTOCOL, "kind": "harness_failed"})
+        raise
     finally:
         timer.cancel()
         harness.close()
