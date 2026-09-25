@@ -399,11 +399,19 @@ SDK with the profile patch in [`harness/oncall.patch.yml`](../harness/oncall.pat
 - provides the diagnostic system prompt;
 - keeps only a local sandbox shell, which is not the target shell.
 
-DSH's notification callback contains private reasoning and complete tool data. The
-`HarnessProgressAdapter` in [`harness_progress.py`](../src/oncall/harness_progress.py) projects only
-allowlisted lifecycle and tool milestones into JSONL. `run_harness()` in
-[`cli.py`](../src/oncall/cli.py) accepts only that protocol and discards other container output. The
-progress stream is presentation data; broker events and admitted evidence are authoritative.
+DSH's notification callback contains assistant content and complete tool data. The
+`HarnessProgressAdapter` in [`harness_progress.py`](../src/oncall/harness_progress.py) parses bounded
+JSON through [`progress_projection.py`](../src/oncall/progress_projection.py), validates evidence and
+hypotheses against the domain models, and emits a closed set of fields as JSONL. The projection includes
+model request/retry counts, safe probe parameters, evidence quality, duration and byte count, selected
+typed facts, hypothesis status changes, canonical report rejection reasons, and continuation target/boot
+relationships. It never forwards assistant text or reasoning, prompts, raw artifacts, unrestricted tool
+output, credentials, or unknown tool names.
+
+`run_harness()` in [`cli.py`](../src/oncall/cli.py) accepts only that protocol and discards other
+container output. `progress_message()` validates the projected fields again before rendering them, so a
+forged protocol line cannot become unrestricted terminal content. The progress stream remains
+presentation data; broker events and admitted evidence are authoritative.
 
 ## Level 9: persistence and lifecycle
 
@@ -536,7 +544,7 @@ Use this table when moving from a diagram or behavior to an implementation revie
 
 | Area | Entry point | Supporting code | Focused tests |
 |---|---|---|---|
-| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`harness_progress.py`](../src/oncall/harness_progress.py) | [`test_cli.py`](../tests/test_cli.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
+| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
 | Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs recorded in Day 1/4 docs |
 | Broker and model relay | [`broker.py`](../src/oncall/broker.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
 | Deterministic provider fixture | [`fixture_provider.py`](../src/oncall/fixture_provider.py) | Broker relay and real DSH runtime | [`test_broker.py`](../tests/test_broker.py), Day 1 acceptance evidence |

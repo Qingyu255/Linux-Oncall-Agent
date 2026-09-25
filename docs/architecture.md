@@ -50,9 +50,11 @@ The agent receives only a short-lived investigation-scoped token. AWS credential
 A thin runner inside the agent container launches the DSH SDK and its child runtime there. The trusted controller dispatches jobs and cancellation to that runner through the scoped control channel; it does not launch a harness subprocess in the credential-bearing controller container. The runner's results remain untrusted proposals until broker validation. For the first release, the operator starts the container pair and stops/replaces the agent container if graceful cancellation fails.
 
 The runner also consumes DSH's session notification callback and projects it onto a versioned JSONL
-progress channel for the operator CLI. Only lifecycle state, allowlisted oncall tool names, success or
-failure, retries, and the turn finish reason cross this channel. Prompts, reasoning blocks, tool
-arguments, tool results, and unknown tool names are discarded inside the agent container. This stream
+progress channel for the operator CLI. Only lifecycle state, model request/retry counts, allowlisted
+probe parameters, evidence metadata, selected typed facts, hypothesis status, canonical policy
+rejections, and continuation identity relationships cross this channel. Prompts, assistant text and
+reasoning, unrestricted arguments and results, raw artifacts, and unknown tool names are discarded
+inside the agent container. The CLI validates the closed protocol again before rendering it. This stream
 is presentation data; persisted broker events and admitted evidence remain authoritative.
 
 ## Remote request flow

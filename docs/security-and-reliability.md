@@ -28,6 +28,10 @@ Fault injection and cleanup are operator tools with a different authority path. 
 - Privilege: probe service is unprivileged; access to logs is explicitly granted and tested. Do not add unrestricted sudo to make an unavailable probe pass. Return unavailable data faithfully.
 - Storage: broker owns authoritative evidence; sanitized copies only in sandbox. Redaction is a practical filter, not a proof that arbitrary production logs are secret-free. Core lab uses synthetic data.
 - Prompt injection: logs/artifacts are data, never instructions. Forged tool requests inside logs cannot grant capabilities. Do not run artifact-provided scripts as part of trusted collection.
+- Progress channel: parse bounded harness JSON, then project only allowlisted parameters and validated
+  domain facts into the versioned JSONL protocol. The CLI validates this projection again and escapes
+  terminal markup. Never forward assistant text, reasoning, raw artifacts, arbitrary error bodies, or
+  unknown tool names; map report failures to a closed set of policy reasons.
 
 Future approvals bind the exact capability, target/boot ID, PID/start ticks, arguments, maximum duration, nonce and expiry. One approval authorizes one bounded action. A boolean `approved=true` from the model is not authorization. Approval policy remains outside harness plugins.
 
