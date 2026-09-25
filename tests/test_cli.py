@@ -1,0 +1,447 @@
+from io import StringIO
+from pathlib import Path
+
+import httpx
+from rich.console import Console
+
+import oncall.cli as cli
+
+
+def test_professional_summary_keeps_raw_capture_out_of_terminal(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    state = {
+        "investigation_id": "a" * 32,
+        "mode": "openai",
+        "probe_calls": 1,
+        "captured_bytes": 1234,
+        "report": {
+            "outcome": "completed",
+            "summary": "CPU pressure is cgroup-local.",
+            "claims": [
+                {
+                    "text": "The cgroup reached its quota.",
+                    "evidence_ids": ["b" * 32],
+                }
+            ],
+            "limitations": ["Short sample."],
+            "next_steps": ["Repeat the sample."],
+        },
+        "evidence": [
+            {
+                "request": {"name": "sample_cpu_pressure"},
+                "status": "ok",
+                "artifact_bytes": 1234,
+                "evidence_id": "b" * 32,
+                "raw": "must not appear in the terminal",
+            }
+        ],
+    }
+
+    cli.show_result(state, Path("report.md"), Path("report.json"), 4.2, verbose=True)
+
+    rendered = output.getvalue()
+    assert "Investigation complete" in rendered
+    assert "CPU pressure is cgroup-local" in rendered
+    assert "sample_cpu_pressure" in rendered
+    assert "report.md" in rendered
+    assert "must not appear" not in rendered
+
+
+def test_continuation_summary_discloses_parent_and_historical_evidence(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    parent_id = "a" * 32
+    historical_id = "b" * 32
+    current_id = "c" * 32
+    state = {
+        "investigation_id": "d" * 32,
+        "parent_investigation_id": parent_id,
+        "mode": "openai",
+        "probe_calls": 1,
+        "captured_bytes": 12,
+        "report": {
+            "outcome": "completed",
+            "summary": "The earlier condition has cleared.",
+            "claims": [
+                {
+                    "text": "CPU pressure existed in the parent run.",
+                    "evidence_ids": [historical_id],
+                    "evidence_scope": "historical",
+                },
+                {
+                    "text": "CPU pressure is absent now.",
+                    "evidence_ids": [current_id],
+                    "evidence_scope": "current",
+                },
+            ],
+            "limitations": ["The current sample is brief."],
+            "next_steps": ["Repeat if symptoms recur."],
+        },
+        "evidence": [
+            {
+                "request": {"name": "rank_processes"},
+                "status": "ok",
+                "artifact_bytes": 12,
+                "evidence_id": current_id,
+            }
+        ],
+        "continuation": {
+            "historical_evidence": [
+                {
+                    "request": {"name": "sample_cpu_pressure"},
+                    "status": "ok",
+                    "artifact_bytes": 34,
+                    "evidence_id": historical_id,
+                    "evidence_scope": "historical",
+                }
+            ]
+        },
+    }
+
+    cli.show_result(state, Path("report.md"), Path("report.json"), 5.0, verbose=True)
+
+    rendered = output.getvalue()
+    assert parent_id in rendered
+    assert "Evidence (historical)" in rendered
+    assert "Evidence (current)" in rendered
+    assert "sample_cpu_pressure" in rendered
+    assert "rank_processes" in rendered
+
+
+def test_failure_detail_counts_probe_errors():
+    state = {
+        "events": [
+            {"kind": "probe_failed", "payload": {"type": "ConnectError"}},
+            {"kind": "probe_failed", "payload": {"type": "ConnectError"}},
+            {"kind": "cancelled", "payload": {}},
+        ]
+    }
+
+    assert cli.failure_detail(state) == "\nProbe failures: ConnectError × 2"
+
+
+def test_default_result_focuses_on_diagnosis_without_runtime_metadata(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    evidence_id = "b" * 32
+    state = {
+        "investigation_id": "a" * 32,
+        "mode": "openai",
+        "probe_calls": 4,
+        "captured_bytes": 1528,
+        "report": {
+            "outcome": "completed",
+            "summary": "The lab mount is full and caused the write failure.",
+            "claims": [
+                {
+                    "text": "The lab mount is 99.6% used.",
+                    "evidence_ids": [evidence_id],
+                }
+            ],
+            "limitations": ["The observation window was brief."],
+            "next_steps": ["Remove the disposable fill file."],
+        },
+        "evidence": [
+            {
+                "request": {"name": "inspect_filesystem"},
+                "status": "ok",
+                "artifact_bytes": 1528,
+                "evidence_id": evidence_id,
+            }
+        ],
+    }
+
+    cli.show_result(state, Path("report.md"), Path("report.json"), 24.9)
+
+    rendered = output.getvalue()
+    assert "The lab mount is full" in rendered
+    assert "The lab mount is 99.6% used" in rendered
+    assert "The observation window was brief" in rendered
+    assert "Remove the disposable fill file" in rendered
+    assert "Detailed report: report.md" in rendered
+    for hidden in (
+        "Investigation complete",
+        "Provider",
+        "Elapsed",
+        "Probe calls",
+        "Captured",
+        evidence_id[:8],
+        "inspect_filesystem",
+        "report.json",
+        "a" * 32,
+    ):
+        assert hidden not in rendered
+
+
+def test_interactive_session_continues_until_new(monkeypatch):
+    requests: list[str] = []
+    prompts: list[tuple[str, str, str | None]] = []
+    run_ids = iter(("root-run", "child-run", "new-root"))
+
+    def handler(request):
+        requests.append(request.url.path)
+        return httpx.Response(
+            200,
+            json={"investigation_id": next(run_ids)},
+            request=request,
+        )
+
+    def execute(
+        _connection,
+        run,
+        prompt,
+        _display_message,
+        parent_id=None,
+        **_options,
+    ):
+        prompts.append((run, prompt, parent_id))
+        return {"investigation_id": run, "status": "completed"}
+
+    monkeypatch.setattr(cli, "execute_investigation", execute)
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://broker"
+    ) as connection:
+        session = cli.InteractiveSession(connection)
+        session._investigate("Disk writes are failing")
+        session._investigate("Is it still happening?")
+        session._command("/new")
+        session._investigate("Investigate CPU pressure")
+
+    assert requests == [
+        "/admin/start",
+        "/admin/runs/root-run/continue",
+        "/admin/start",
+    ]
+    assert prompts[0] == ("root-run", "Disk writes are failing", None)
+    assert prompts[1][0] == "child-run"
+    assert prompts[1][2] == "root-run"
+    assert "Prior-run evidence is historical" in prompts[1][1]
+    assert "Is it still happening?" in prompts[1][1]
+    assert prompts[2] == ("new-root", "Investigate CPU pressure", None)
+
+
+def test_session_routes_capability_questions_to_the_agent(monkeypatch):
+    output = StringIO()
+    test_console = Console(file=output, force_terminal=False, width=100)
+    messages = iter(("what can you do?", "Investigate CPU pressure", "/exit"))
+    investigations: list[str] = []
+    monkeypatch.setattr(test_console, "input", lambda _prompt: next(messages))
+    monkeypatch.setattr(cli, "console", test_console)
+
+    session = cli.InteractiveSession(object())  # type: ignore[arg-type]
+    monkeypatch.setattr(session, "_investigate", investigations.append)
+    session.run()
+
+    assert investigations == ["what can you do?", "Investigate CPU pressure"]
+
+
+def test_session_command_normalizes_paste_sequences_and_unicode_slashes():
+    assert cli.session_command("/HELP") == "/help"
+    assert cli.session_command("\x1b[200~/help\x1b[201~") == "/help"
+    assert cli.session_command("／target") == "/target"
+    assert cli.session_command("Investigate /var capacity") is None
+
+
+def test_session_target_discloses_ec2_scope(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={"target": {"target_id": "i-0123456789abcdef0"}},
+            request=request,
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://broker"
+    ) as connection:
+        session = cli.InteractiveSession(connection)
+        assert session._command("/target") is False
+
+    assert "i-0123456789abcdef0" in output.getvalue()
+    assert "EC2 host" in output.getvalue()
+
+
+def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    monkeypatch.setattr(
+        cli,
+        "run_harness",
+        lambda *_args, **_options: cli.HarnessRunOutcome(0, None, 0),
+    )
+    monkeypatch.setattr(cli, "save_state", lambda *_args, **_options: Path("failed-state.json"))
+
+    class Response:
+        def raise_for_status(self):
+            return self
+
+        def json(self):
+            return {
+                "investigation_id": "a" * 32,
+                "status": "running",
+                "events": [],
+            }
+
+    class Connection:
+        def get(self, _path):
+            return Response()
+
+        def post(self, _path):
+            return Response()
+
+    result = cli.execute_investigation(
+        Connection(),  # type: ignore[arg-type]
+        "a" * 32,
+        "Investigate a write failure",
+        "Investigate a write failure",
+        exit_on_failure=False,
+    )
+
+    rendered = output.getvalue()
+    assert result is None
+    assert "model stopped before submitting" in rendered
+    assert "valid report" in rendered
+    assert "Please retry with the Linux symptom" in rendered
+    assert "Investigation failed" not in rendered
+
+
+def test_conversational_response_requires_no_diagnostic_actions():
+    state = {
+        "status": "running",
+        "report": None,
+        "probe_calls": 0,
+        "evidence": [],
+        "hypotheses": [],
+        "events": [
+            {"kind": "started"},
+            {"kind": "model_request"},
+        ],
+    }
+    conversation = cli.HarnessRunOutcome(0, "I can investigate Linux incidents.", 0)
+
+    assert cli.permits_conversational_response(state, conversation) is True
+    assert (
+        cli.permits_conversational_response(
+            {**state, "events": [*state["events"], {"kind": "report_rejected"}]},
+            conversation,
+        )
+        is False
+    )
+    assert (
+        cli.permits_conversational_response(
+            state,
+            cli.HarnessRunOutcome(0, "I used a tool.", 1),
+        )
+        is False
+    )
+
+
+def test_interactive_conversational_response_is_rendered_and_run_is_cancelled(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    monkeypatch.setattr(
+        cli,
+        "run_harness",
+        lambda *_args, **_options: cli.HarnessRunOutcome(
+            0,
+            "I can explain [unsafe] Linux diagnostics.",
+            0,
+        ),
+    )
+    posts: list[str] = []
+
+    class Response:
+        def raise_for_status(self):
+            return self
+
+        def json(self):
+            return {
+                "investigation_id": "a" * 32,
+                "status": "running",
+                "report": None,
+                "probe_calls": 0,
+                "evidence": [],
+                "hypotheses": [],
+                "events": [{"kind": "started"}, {"kind": "model_request"}],
+            }
+
+    class Connection:
+        def get(self, _path):
+            return Response()
+
+        def post(self, path):
+            posts.append(path)
+            return Response()
+
+    result = cli.execute_investigation(
+        Connection(),  # type: ignore[arg-type]
+        "a" * 32,
+        "What can you do?",
+        "What can you do?",
+        exit_on_failure=False,
+        allow_conversation=True,
+    )
+
+    assert result is None
+    assert posts == ["/admin/cancel"]
+    assert "I can explain [unsafe] Linux diagnostics." in output.getvalue()
+
+
+def test_quiet_progress_uses_spinner_for_active_probe_and_keeps_result(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+
+    class Activity:
+        def __init__(self):
+            self.updates: list[str] = []
+            self.starts = 0
+            self.stops = 0
+
+        def update(self, message):
+            self.updates.append(message)
+
+        def start(self):
+            self.starts += 1
+
+        def stop(self):
+            self.stops += 1
+
+    activity = Activity()
+    cli.show_progress(
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_started",
+            "tool": "inspect_filesystem",
+            "mount_id": "lab",
+        },
+        0,
+        activity=activity,  # type: ignore[arg-type]
+    )
+
+    assert activity.updates == ["[cyan]Checking capacity on the lab mount…[/]"]
+    assert output.getvalue() == ""
+
+    cli.show_progress(
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_finished",
+            "tool": "inspect_filesystem",
+            "quality": "ok",
+            "facts": {
+                "kind": "filesystem",
+                "mount_id": "lab",
+                "used_percent": 99.6,
+                "available_bytes": 4 * 1024 * 1024,
+            },
+        },
+        0,
+        activity=activity,  # type: ignore[arg-type]
+    )
+
+    assert "The lab mount is 99.6% used with 4.0 MiB available" in output.getvalue()
+    assert activity.stops == 1
+    assert activity.starts == 1
+    assert activity.updates[-1] == cli.DEFAULT_ACTIVITY_MESSAGE

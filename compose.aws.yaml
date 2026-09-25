@@ -1,0 +1,18 @@
+services:
+  broker:
+    environment:
+      ONCALL_TARGET_URL: https://host.docker.internal:18765
+      ONCALL_TARGET_CA: /run/secrets/target_ca
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    secrets:
+      - target_token
+      - agent_token
+      - admin_token
+      - target_ca
+
+secrets:
+  target_token:
+    file: .local/aws/target_token
+  target_ca:
+    file: .local/aws/target_ca.pem

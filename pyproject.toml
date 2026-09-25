@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "linux-oncall-agent"
+version = "0.1.0"
+description = "Bounded Linux observations and evidence-driven incident investigation"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.13.5", "httpx==0.28.1", "typer==0.27.2",
+  "fastapi==0.141.1", "uvicorn==0.53.0", "mcp==2.2.0", "rich==15.0.0",
+]
+
+[project.optional-dependencies]
+harness = ["deepseek-harness-sdk==0.1.5rc1", "pyyaml==6.0.3"]
+
+[dependency-groups]
+dev = [
+  "build==1.3.0", "hatchling==1.30.1", "pytest==9.1.1",
+  "pytest-asyncio==1.4.0", "ruff==0.16.8", "mypy==2.3.1",
+]
+
+[project.scripts]
+oncall = "oncall.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/oncall"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/oncall"]

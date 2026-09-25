@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec > >(tee /var/log/linux-oncall-bootstrap.log) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ca-certificates curl openssl python3.12-venv unzip
+
+curl --fail --silent --show-error --location \
+  https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --update
+
+TOKEN=$(curl --fail --silent --show-error --request PUT \
+  --header 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+  http://169.254.169.254/latest/api/token)
+INSTANCE_ID=$(curl --fail --silent --show-error \
+  --header "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+
+install -d -m 0750 -o root -g root /etc/oncall /opt/oncall /var/lib/oncall-lab/data
+python3.12 -m venv /opt/oncall
+WHEEL=/tmp/linux_oncall_agent-0.1.0-py3-none-any.whl
+aws s3 cp 's3://${release_bucket}/${release_key}' "$WHEEL" --region '${region}'
+echo '${release_sha256}  /tmp/linux_oncall_agent-0.1.0-py3-none-any.whl' | \
+  sha256sum --check --strict
+/opt/oncall/bin/pip install --no-cache-dir "$WHEEL"
+
+if ! id oncall >/dev/null 2>&1; then
+  useradd --system --home /var/lib/oncall --create-home --shell /usr/sbin/nologin oncall
+fi
+getent group systemd-journal >/dev/null && usermod -a -G systemd-journal oncall
+chown -R root:oncall /opt/oncall
+chmod 0750 /opt/oncall
+chown root:oncall /etc/oncall
+chmod 0750 /etc/oncall
+
+/opt/oncall/bin/python -c 'import secrets; print(secrets.token_urlsafe(32))' \
+  > /etc/oncall/target_token
+chown root:oncall /etc/oncall/target_token
+chmod 0640 /etc/oncall/target_token
+
+openssl req -x509 -nodes -newkey rsa:2048 -days 2 \
+  -keyout /etc/oncall/target-key.pem -out /etc/oncall/target-ca.pem \
+  -subj '/CN=host.docker.internal' \
+  -addext 'subjectAltName=DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1'
+chown root:oncall /etc/oncall/target-key.pem /etc/oncall/target-ca.pem
+chmod 0640 /etc/oncall/target-key.pem
+chmod 0644 /etc/oncall/target-ca.pem
+
+VOLUME_DEVICE=''
+for attempt in $(seq 1 60); do
+  for serial_path in /sys/block/nvme*n1/device/serial; do
+    [ -e "$serial_path" ] || continue
+    if [ "$(cat "$serial_path")" = '${lab_volume_serial}' ]; then
+      VOLUME_DEVICE="/dev/$(basename "$(dirname "$(dirname "$serial_path")")")"
+      break 2
+    fi
+  done
+  if [ -b /dev/xvdf ]; then
+    VOLUME_DEVICE=/dev/xvdf
+    break
+  fi
+  sleep 5
+done
+test -n "$VOLUME_DEVICE"
+if ! blkid "$VOLUME_DEVICE" >/dev/null 2>&1; then
+  mkfs.ext4 -q -L oncall-lab "$VOLUME_DEVICE"
+fi
+VOLUME_UUID=$(blkid -s UUID -o value "$VOLUME_DEVICE")
+grep -q "$VOLUME_UUID" /etc/fstab || \
+  echo "UUID=$VOLUME_UUID /var/lib/oncall-lab/data ext4 defaults,nofail 0 2" >> /etc/fstab
+mount /var/lib/oncall-lab/data
+chown oncall:oncall /var/lib/oncall-lab/data
+echo 'linux-oncall-dedicated-lab' > /var/lib/oncall-lab/data/.oncall-lab-volume
+chown root:oncall /var/lib/oncall-lab/data/.oncall-lab-volume
+chmod 0440 /var/lib/oncall-lab/data/.oncall-lab-volume
+
+cat > /etc/systemd/system/oncall-target.service <<UNIT
+[Unit]
+Description=Linux OnCall bounded probe service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oncall
+Group=oncall
+SupplementaryGroups=systemd-journal
+Environment=TARGET_ID=$INSTANCE_ID
+Environment=ONCALL_SECRETS_DIR=/etc/oncall
+Environment=ONCALL_LAB_CGROUP=/sys/fs/cgroup/oncall.slice/oncall-lab.slice
+Environment=ONCALL_LAB_MOUNT=/var/lib/oncall-lab/data
+ExecStart=/opt/oncall/bin/uvicorn oncall.target:create_app --factory --host 127.0.0.1 --port 8765 --no-access-log --ssl-keyfile /etc/oncall/target-key.pem --ssl-certfile /etc/oncall/target-ca.pem
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now oncall-target.service
+
+PARAMETER_NAME='${parameter_prefix}/'"$INSTANCE_ID"'/target-token'
+aws ssm put-parameter --region '${region}' --name "$PARAMETER_NAME" \
+  --type SecureString --value file:///etc/oncall/target_token --overwrite >/dev/null
+
+for attempt in $(seq 1 30); do
+  if curl --fail --silent --show-error --cacert /etc/oncall/target-ca.pem \
+    https://127.0.0.1:8765/health >/dev/null; then
+    touch /var/lib/oncall/ready
+    exit 0
+  fi
+  sleep 2
+done
+exit 1
