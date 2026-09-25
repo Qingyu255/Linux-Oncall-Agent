@@ -114,12 +114,16 @@ reliability as reasoning success.
 mix stale measurements, different target boots, and unrelated incidents. Reopening an accepted report
 would also weaken reproducibility and auditability.
 
-**Decision:** `investigate` always creates a fresh root run. `continue <run-id>` creates a new child run
-within a 24-hour TTL and a five-generation lineage bound. The child reconstructs context from trusted
-reports, hypotheses, and evidence. Prior evidence is labeled historical with its age. Retrospective
-claims cite historical evidence; claims about current conditions require fresh child evidence. The
-first new observation must match the parent target and records same-boot versus rebooted status.
+**Decision:** `oncall` opens an interactive incident session by default. The first message creates a
+root run, and each follow-up creates a new child run in the same incident until the operator uses
+`/new`. `investigate` and `continue <run-id>` retain the same behavior as explicit noninteractive entry
+points. Continuation has a 24-hour TTL and a five-generation lineage bound. Each child uses a fresh
+model session and reconstructs context from trusted reports, hypotheses, and evidence. Prior evidence
+is labeled historical with its age. Retrospective claims cite historical evidence; claims about current
+conditions require fresh child evidence. The first new observation must match the parent target and
+records same-boot versus rebooted status.
 
 **Tradeoff:** continuation spends a new model session and does not reproduce every hidden token from
 the old transcript. In return, the operational context is explicit, bounded, inspectable, and tied to
-the evidence that actually supports the answer.
+the evidence that actually supports the answer. The session stops accepting follow-ups at the lineage
+bound and directs the operator to `/new`, rather than silently discarding older context.

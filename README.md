@@ -66,9 +66,38 @@ Completions. Recreate the broker after changing `.env`:
 docker compose up -d --no-deps --force-recreate --wait broker
 ```
 
-`--symptom` is retained as the operator's incident description. It is optional because the command has
-a CPU-oriented default, but explicit symptoms give memory, filesystem, and unavailable-target trials
-the correct starting context.
+The default interface is an incident session. Enter the first symptom, ask follow-up questions against
+the same evidence lineage, and use `/new` when the next message belongs to a different incident:
+
+```text
+$ .venv/bin/oncall
+Linux OnCall
+Describe the incident. Follow-up messages stay in this incident; use /new to start another.
+
+oncall> Investigate the service write failure and identify the constrained mount.
+→ Checking capacity on the root mount…
+✓ The root mount is 43.9% used with 3.8 GiB available.
+→ Checking capacity on the lab mount…
+✓ The lab mount is 99.6% used with 4.0 MiB available.
+...
+oncall> Is the capacity failure still present?
+oncall> /new
+oncall> Investigate current CPU pressure.
+oncall> /exit
+```
+
+Each message is a new immutable run within the incident lineage. A follow-up receives trusted reports,
+hypotheses, and evidence from earlier runs as historical context. It does not reuse hidden model
+reasoning, and any claim about the target's current condition still requires a fresh observation. The
+lineage is available for 24 hours and is limited to five generations; use `/new` after that bound.
+
+Use `/status` for the latest diagnosis and `/verbose` to toggle model request counts, timings, evidence
+IDs, byte counts, and other technical telemetry. `oncall --verbose` starts with that view enabled.
+
+`oncall investigate --symptom ...` remains the single-run interface for scripts and repeatable trials.
+`--symptom` is optional because the command has a CPU-oriented default, but explicit symptoms give
+memory, filesystem, and unavailable-target trials the correct starting context. Add `--verbose` when a
+trial needs the complete progress and evidence metadata in the terminal.
 
 ### Create and investigate local scenarios
 
@@ -136,8 +165,9 @@ filesystem scenarios rather than weakening those safeguards:
 lease bounds the fault, and `lab-stop` removes only manifest-owned files/processes and verifies reset.
 See [AWS and Terraform](docs/aws-terraform.md) for provisioning and the SSM tunnel workflow.
 
-The terminal shows a compact diagnosis, evidence table, limitations, next steps, and artifact paths.
-Complete JSON and Markdown remain under `.local/reports/<investigation-id>/`.
+The default terminal view shows meaningful probe actions, interpreted observations, the diagnosis,
+findings, limitations, next steps, and the Markdown report path. It omits transport and runtime noise.
+Complete JSON, evidence references, and Markdown remain under `.local/reports/<investigation-id>/`.
 
 ## Quick start: disposable AWS fault lab
 

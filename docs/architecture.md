@@ -54,8 +54,10 @@ progress channel for the operator CLI. Only lifecycle state, model request/retry
 probe parameters, evidence metadata, selected typed facts, hypothesis status, canonical policy
 rejections, and continuation identity relationships cross this channel. Prompts, assistant text and
 reasoning, unrestricted arguments and results, raw artifacts, and unknown tool names are discarded
-inside the agent container. The CLI validates the closed protocol again before rendering it. This stream
-is presentation data; persisted broker events and admitted evidence remain authoritative.
+inside the agent container. The CLI validates the closed protocol again. Its default view renders only
+meaningful observation actions and interpreted typed facts; `--verbose` exposes the remaining safe
+technical fields. This stream is presentation data; persisted broker events and admitted evidence
+remain authoritative.
 
 ## Remote request flow
 

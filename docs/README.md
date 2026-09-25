@@ -37,12 +37,12 @@ The live DSH/API path is verified with accepted `gpt-4.1-mini` and `gpt-5.6-terr
 deterministic evidence gates; the mini report failed causal review and the Terra report passed. The
 next gate is to run and human-score the full matrix; substrate passes are not diagnostic-quality passes.
 
-`oncall investigate` streams a safe progress timeline from DeepSeek Harness while it runs. The SDK's
-notification callback is projected into lifecycle events, model request/retry counts, allowlisted
-probe parameters, evidence quality and size, selected typed facts, hypothesis transitions, report
-policy decisions, and continuation identity checks. Assistant text and reasoning, prompts, unrestricted
-arguments and results, raw evidence, and credentials are excluded from this terminal channel. Complete
-admitted evidence remains in the final JSON and Markdown reports.
+Running `oncall` opens an interactive incident session. The normal terminal view turns safe harness
+events into short operator statements about the observation being made and the typed fact it returned.
+Harness lifecycle events, model counters, timings, byte counts, IDs, and empty transport details stay
+hidden unless the operator enables `/verbose` or passes `--verbose`. Assistant text and reasoning,
+prompts, unrestricted arguments and results, raw evidence, and credentials never cross this terminal
+channel. Complete admitted evidence remains in the final JSON and Markdown reports.
 
 Four focused days is an aggressive target, approximately 24–32 engineering hours, assuming AWS access and a working model credential. Reserve two more days for integration surprises and presentation preparation. Scope should shrink before the execution boundary or evidence quality does.
 

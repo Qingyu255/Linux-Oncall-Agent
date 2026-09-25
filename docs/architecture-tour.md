@@ -574,9 +574,12 @@ relationships. It never forwards assistant text or reasoning, prompts, raw artif
 output, credentials, or unknown tool names.
 
 `run_harness()` in [`cli.py`](../src/oncall/cli.py) accepts only that protocol and discards other
-container output. `progress_message()` validates the projected fields again before rendering them, so a
-forged protocol line cannot become unrestricted terminal content. The progress stream remains
-presentation data; broker events and admitted evidence are authoritative.
+container output. The normal view passes each event through
+[`operator_view.py`](../src/oncall/operator_view.py), which suppresses lifecycle and transport noise and
+turns allowlisted typed facts into short natural-language observations. `--verbose` uses
+`progress_message()` for the full safe technical projection. Both renderers validate projected fields
+again, so a forged protocol line cannot become unrestricted terminal content. The progress stream
+remains presentation data; broker events and admitted evidence are authoritative.
 
 ## Level 9: persistence and lifecycle
 
@@ -615,6 +618,42 @@ it never reopens an accepted report. Prior evidence includes its age and histori
 claims require child evidence, while retrospective claims may cite the parent lineage. The first new
 probe enforces the same target identity and records same-boot versus rebooted status. A completed
 report cannot rely on limited, denied, or unsupported evidence.
+
+The interactive shell presents those immutable runs as one incident conversation:
+
+```mermaid
+sequenceDiagram
+    actor O as Operator
+    participant C as oncall session
+    participant B as Broker
+    participant H as Fresh harness turn
+    participant S as Evidence store
+
+    O->>C: First incident message
+    C->>B: Start root run
+    C->>H: Investigate root run
+    H->>B: Typed probe and report calls
+    B->>S: Append evidence, events, report
+    B-->>C: Accepted diagnosis
+    C-->>O: Natural-language result
+
+    O->>C: Follow-up message
+    C->>B: Continue latest run
+    B->>S: Read bounded historical lineage
+    C->>H: New turn with trusted historical context
+    H->>B: Fresh probes for current claims
+    B->>S: Append child evidence and report
+    B-->>C: Accepted child diagnosis
+    C-->>O: Follow-up result
+
+    O->>C: /new
+    C->>C: Clear current lineage pointer
+```
+
+The CLI session remembers only the latest run ID. The broker and evidence store provide continuity;
+the system never treats a hidden model transcript as operational memory. This keeps the conversational
+interface compatible with immutable reports, target and boot checks, fresh-evidence rules, the 24-hour
+TTL, and the five-generation bound.
 
 ## Level 10: fault lab and evaluation
 
@@ -709,7 +748,7 @@ Use this table when moving from a diagram or behavior to an implementation revie
 
 | Area | Entry point | Supporting code | Focused tests |
 |---|---|---|---|
-| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
+| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`operator_view.py`](../src/oncall/operator_view.py), [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_operator_view.py`](../tests/test_operator_view.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
 | Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs recorded in Day 1/4 docs |
 | Broker and model relay | [`broker.py`](../src/oncall/broker.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
 | Deterministic provider fixture | [`fixture_provider.py`](../src/oncall/fixture_provider.py) | Broker relay and real DSH runtime | [`test_broker.py`](../tests/test_broker.py), Day 1 acceptance evidence |
