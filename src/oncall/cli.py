@@ -14,6 +14,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
@@ -50,6 +51,7 @@ SESSION_GUIDANCE = (
     "for session commands."
 )
 SESSION_COMMAND_SLASHES = str.maketrans({"／": "/", "⁄": "/"})
+DEFAULT_ACTIVITY_MESSAGE = "[cyan]Investigating…[/]"
 
 
 def display_path(path: Path) -> str:
@@ -250,14 +252,28 @@ def save_state(state: dict[str, Any], filename: str = "report.json") -> Path:
     return path
 
 
-def show_progress(event: dict[str, Any], started: float, *, verbose: bool = False) -> None:
+def show_progress(
+    event: dict[str, Any],
+    started: float,
+    *,
+    verbose: bool = False,
+    activity: Status | None = None,
+) -> None:
     """Render one safe event produced by the sandbox progress adapter."""
     rendered = progress_message(event) if verbose else operator_progress_message(event)
     if rendered is None:
         return
     style, symbol, message = rendered
+    if activity is not None and event.get("kind") == "tool_started":
+        activity.update(f"[{style}]{escape(message)}[/]")
+        return
+    if activity is not None:
+        activity.stop()
     prefix = f"[dim]{time.monotonic() - started:6.1f}s[/] " if verbose else ""
     console.print(f"{prefix}[{style}]{symbol}[/] {escape(message)}")
+    if activity is not None:
+        activity.update(DEFAULT_ACTIVITY_MESSAGE)
+        activity.start()
 
 
 def run_harness(
@@ -267,6 +283,7 @@ def run_harness(
     timeout: float = 175,
     *,
     verbose: bool = False,
+    activity: Status | None = None,
 ) -> int:
     """Stream the runner's JSONL protocol while retaining an outer hard deadline."""
     command = [
@@ -310,9 +327,9 @@ def run_harness(
             for _key, _ in selector.select(timeout=min(0.25, remaining)):
                 line = process.stdout.readline()
                 if line:
-                    handle_harness_line(line, started, verbose=verbose)
+                    handle_harness_line(line, started, verbose=verbose, activity=activity)
         for line in process.stdout:
-            handle_harness_line(line, started, verbose=verbose)
+            handle_harness_line(line, started, verbose=verbose, activity=activity)
         return process.wait()
     finally:
         selector.close()
@@ -326,14 +343,20 @@ def run_harness(
                 process.wait()
 
 
-def handle_harness_line(line: str, started: float, *, verbose: bool = False) -> None:
+def handle_harness_line(
+    line: str,
+    started: float,
+    *,
+    verbose: bool = False,
+    activity: Status | None = None,
+) -> None:
     """Accept only the explicit progress protocol; discard runtime diagnostics."""
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
         return
     if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
-        show_progress(event, started, verbose=verbose)
+        show_progress(event, started, verbose=verbose, activity=activity)
 
 
 def continuation_prompt(run_id: str, message: str) -> str:
@@ -367,7 +390,20 @@ def execute_investigation(
         )
     started = time.monotonic()
     try:
-        return_code = run_harness(run, prompt, started, verbose=verbose)
+        activity = None if verbose else console.status(DEFAULT_ACTIVITY_MESSAGE, spinner="dots")
+        if activity is not None:
+            activity.start()
+        try:
+            return_code = run_harness(
+                run,
+                prompt,
+                started,
+                verbose=verbose,
+                activity=activity,
+            )
+        finally:
+            if activity is not None:
+                activity.stop()
         if return_code:
             raise RuntimeError(f"Harness exited with {return_code}")
         state_value = connection.get("/admin/state").raise_for_status().json()

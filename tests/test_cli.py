@@ -313,3 +313,60 @@ def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
     assert "valid report" in rendered
     assert "Please retry with the Linux symptom" in rendered
     assert "Investigation failed" not in rendered
+
+
+def test_quiet_progress_uses_spinner_for_active_probe_and_keeps_result(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+
+    class Activity:
+        def __init__(self):
+            self.updates: list[str] = []
+            self.starts = 0
+            self.stops = 0
+
+        def update(self, message):
+            self.updates.append(message)
+
+        def start(self):
+            self.starts += 1
+
+        def stop(self):
+            self.stops += 1
+
+    activity = Activity()
+    cli.show_progress(
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_started",
+            "tool": "inspect_filesystem",
+            "mount_id": "lab",
+        },
+        0,
+        activity=activity,  # type: ignore[arg-type]
+    )
+
+    assert activity.updates == ["[cyan]Checking capacity on the lab mount…[/]"]
+    assert output.getvalue() == ""
+
+    cli.show_progress(
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_finished",
+            "tool": "inspect_filesystem",
+            "quality": "ok",
+            "facts": {
+                "kind": "filesystem",
+                "mount_id": "lab",
+                "used_percent": 99.6,
+                "available_bytes": 4 * 1024 * 1024,
+            },
+        },
+        0,
+        activity=activity,  # type: ignore[arg-type]
+    )
+
+    assert "The lab mount is 99.6% used with 4.0 MiB available" in output.getvalue()
+    assert activity.stops == 1
+    assert activity.starts == 1
+    assert activity.updates[-1] == cli.DEFAULT_ACTIVITY_MESSAGE
