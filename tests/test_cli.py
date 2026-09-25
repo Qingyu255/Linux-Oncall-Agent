@@ -247,6 +247,34 @@ def test_session_guidance_does_not_swallow_real_incident_descriptions():
     assert cli.session_guidance("Help investigate errno 28") is None
 
 
+def test_session_command_normalizes_paste_sequences_and_unicode_slashes():
+    assert cli.session_command("/HELP") == "/help"
+    assert cli.session_command("\x1b[200~/help\x1b[201~") == "/help"
+    assert cli.session_command("／target") == "/target"
+    assert cli.session_command("Investigate /var capacity") is None
+
+
+def test_session_target_discloses_ec2_scope(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={"target": {"target_id": "i-0123456789abcdef0"}},
+            request=request,
+        )
+
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="http://broker"
+    ) as connection:
+        session = cli.InteractiveSession(connection)
+        assert session._command("/target") is False
+
+    assert "i-0123456789abcdef0" in output.getvalue()
+    assert "EC2 host" in output.getvalue()
+
+
 def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
     output = StringIO()
     monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))

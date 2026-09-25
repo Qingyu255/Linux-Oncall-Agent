@@ -49,6 +49,7 @@ SESSION_GUIDANCE = (
     "read-only probes; I do not run arbitrary target commands or remediate the system. Use /help "
     "for session commands."
 )
+SESSION_COMMAND_SLASHES = str.maketrans({"／": "/", "⁄": "/"})
 
 
 def display_path(path: Path) -> str:
@@ -66,6 +67,15 @@ def session_guidance(message: str) -> str | None:
     if normalized in {"hello", "hey", "hi", "hi there"}:
         return "Hi. Describe the Linux symptom you want me to investigate, or ask what I can do."
     return None
+
+
+def session_command(message: str) -> str | None:
+    """Normalize a slash command, including bracketed-paste and Unicode slash forms."""
+    cleaned = message.replace("\x1b[200~", "").replace("\x1b[201~", "")
+    cleaned = cleaned.strip().translate(SESSION_COMMAND_SLASHES)
+    if not cleaned.startswith("/"):
+        return None
+    return "/" + cleaned[1:].strip().casefold()
 
 
 def failure_detail(state: dict[str, Any]) -> str:
@@ -420,7 +430,7 @@ class InteractiveSession:
             "Describe the incident. Follow-up messages stay in this incident; "
             "use [bold]/new[/] to start another."
         )
-        console.print("[dim]Commands: /new, /status, /verbose, /help, /exit[/]\n")
+        console.print("[dim]Commands: /new, /status, /target, /verbose, /help, /exit[/]\n")
         while True:
             try:
                 message = console.input("[bold cyan]oncall>[/] ").strip()
@@ -429,8 +439,9 @@ class InteractiveSession:
                 return
             if not message:
                 continue
-            if message.startswith("/"):
-                if self._command(message):
+            command = session_command(message)
+            if command is not None:
+                if self._command(command):
                     return
                 continue
             guidance = session_guidance(message)
@@ -459,6 +470,16 @@ class InteractiveSession:
             else:
                 console.print(f"[dim]Current incident status: {escape(str(state['status']))}[/]")
             return False
+        if command == "/target":
+            try:
+                readiness = self._connection.get("/admin/readiness").raise_for_status().json()
+                target = readiness["target"]
+                target_id = str(target["target_id"])
+                target_kind = "EC2 host" if target_id.startswith("i-") else "local Docker target"
+                console.print(f"[bold]Target:[/] {escape(target_id)} [dim]({target_kind})[/]")
+            except (httpx.HTTPError, KeyError, TypeError) as error:
+                console.print(f"[red]Could not read target readiness: {escape(str(error))}[/]")
+            return False
         if command == "/verbose":
             self._verbose = not self._verbose
             mode = "on" if self._verbose else "off"
@@ -468,8 +489,11 @@ class InteractiveSession:
             console.print(
                 "Enter an incident description or follow-up question.\n"
                 "[bold]/new[/] starts a separate incident. [bold]/status[/] shows the latest "
-                "diagnosis. [bold]/verbose[/] toggles technical telemetry. "
-                "[bold]/exit[/] leaves the session."
+                "diagnosis. [bold]/target[/] shows which Linux system is connected. "
+                "[bold]/verbose[/] toggles technical telemetry. "
+                "[bold]/exit[/] leaves the session.\n"
+                "Fault injection remains operator-only: run [bold]oncall lab-start[/] and "
+                "[bold]oncall lab-stop[/] in another terminal."
             )
             return False
         console.print("[yellow]Unknown command. Use /help to list commands.[/]")
