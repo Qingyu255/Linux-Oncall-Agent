@@ -335,7 +335,9 @@ def test_cli_ignores_non_protocol_harness_output(monkeypatch):
     cli.handle_harness_line('{"reasoning":"must stay hidden"}\n', started=10.0)
     cli.handle_harness_line("runtime diagnostic with a token\n", started=10.0)
     cli.handle_harness_line(
-        '{"protocol":"oncall-progress-v1","kind":"analysis_started"}\n', started=10.0
+        '{"protocol":"oncall-progress-v1","kind":"analysis_started"}\n',
+        started=10.0,
+        verbose=True,
     )
 
     rendered = output.getvalue()

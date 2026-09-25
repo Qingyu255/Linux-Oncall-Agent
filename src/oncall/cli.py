@@ -18,8 +18,13 @@ from rich.text import Text
 
 from oncall.faults import SCENARIOS, FaultController, SsmOperatorExecutor
 from oncall.harness_progress import PROGRESS_PROTOCOL, progress_message
+from oncall.operator_view import operator_progress_message
 
-app = typer.Typer(help="Linux OnCall Agent local lab")
+app = typer.Typer(
+    help="Evidence-driven Linux incident investigation",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
 ROOT = Path(__file__).resolve().parents[2]
 console = Console()
 
@@ -121,51 +126,59 @@ def render(state: dict[str, Any]) -> str:
 
 
 def show_result(
-    state: dict[str, Any], report_path: Path, json_path: Path, elapsed_seconds: float
+    state: dict[str, Any],
+    report_path: Path,
+    json_path: Path,
+    elapsed_seconds: float,
+    *,
+    verbose: bool = False,
 ) -> None:
-    """Render a compact terminal result while Markdown retains complete evidence."""
+    """Render the operator result while Markdown retains complete evidence."""
     report = state.get("report")
     if not isinstance(report, dict):
         raise ValueError("Completed investigation has no report")
 
-    metadata = Table.grid(padding=(0, 2))
-    metadata.add_column(style="dim")
-    metadata.add_column(style="bold")
-    metadata.add_row("Run", str(state["investigation_id"]))
-    if state.get("parent_investigation_id"):
-        metadata.add_row("Parent", str(state["parent_investigation_id"]))
-    metadata.add_row("Provider", str(state["mode"]))
-    metadata.add_row("Outcome", str(report["outcome"]))
-    metadata.add_row("Elapsed", f"{elapsed_seconds:.1f}s")
-    metadata.add_row("Probe calls", str(state.get("probe_calls", "unavailable")))
-    metadata.add_row("Captured", f"{int(state.get('captured_bytes', 0)):,} bytes")
-    console.print(
-        Panel(metadata, title="[bold green]Investigation complete[/]", border_style="green")
-    )
+    if verbose:
+        metadata = Table.grid(padding=(0, 2))
+        metadata.add_column(style="dim")
+        metadata.add_column(style="bold")
+        metadata.add_row("Run", str(state["investigation_id"]))
+        if state.get("parent_investigation_id"):
+            metadata.add_row("Parent", str(state["parent_investigation_id"]))
+        metadata.add_row("Provider", str(state["mode"]))
+        metadata.add_row("Outcome", str(report["outcome"]))
+        metadata.add_row("Elapsed", f"{elapsed_seconds:.1f}s")
+        metadata.add_row("Probe calls", str(state.get("probe_calls", "unavailable")))
+        metadata.add_row("Captured", f"{int(state.get('captured_bytes', 0)):,} bytes")
+        console.print(
+            Panel(metadata, title="[bold green]Investigation complete[/]", border_style="green")
+        )
     console.print(Panel(escape(str(report["summary"])), title="Diagnosis", border_style="cyan"))
 
-    console.print("\n[bold]Evidence-backed findings[/]")
+    console.print("\n[bold]Findings[/]")
     for index, claim in enumerate(report["claims"], start=1):
-        references = ", ".join(str(item)[:8] for item in claim["evidence_ids"])
         console.print(f"  [bold cyan]{index}.[/] {escape(str(claim['text']))}")
-        scope = str(claim.get("evidence_scope", "current"))
-        console.print(f"     [dim]Evidence ({scope}): {references}[/]")
+        if verbose:
+            references = ", ".join(str(item)[:8] for item in claim["evidence_ids"])
+            scope = str(claim.get("evidence_scope", "current"))
+            console.print(f"     [dim]Evidence ({scope}): {references}[/]")
 
-    evidence_table = Table(title="Investigation evidence", header_style="bold magenta")
-    evidence_table.add_column("Scope")
-    evidence_table.add_column("Probe")
-    evidence_table.add_column("Quality")
-    evidence_table.add_column("Bytes", justify="right")
-    evidence_table.add_column("Evidence ID")
-    for evidence in evidence_view(state):
-        evidence_table.add_row(
-            str(evidence.get("evidence_scope", "current")),
-            str(evidence["request"]["name"]),
-            str(evidence["status"]),
-            f"{int(evidence['artifact_bytes']):,}",
-            str(evidence["evidence_id"])[:12],
-        )
-    console.print(evidence_table)
+    if verbose:
+        evidence_table = Table(title="Investigation evidence", header_style="bold magenta")
+        evidence_table.add_column("Scope")
+        evidence_table.add_column("Probe")
+        evidence_table.add_column("Quality")
+        evidence_table.add_column("Bytes", justify="right")
+        evidence_table.add_column("Evidence ID")
+        for evidence in evidence_view(state):
+            evidence_table.add_row(
+                str(evidence.get("evidence_scope", "current")),
+                str(evidence["request"]["name"]),
+                str(evidence["status"]),
+                f"{int(evidence['artifact_bytes']):,}",
+                str(evidence["evidence_id"])[:12],
+            )
+        console.print(evidence_table)
 
     for title, field, style in (
         ("Limitations", "limitations", "yellow"),
@@ -179,8 +192,9 @@ def show_result(
                 content.append("\n")
         console.print(Panel(content, title=title, border_style=style))
 
-    console.print(f"[bold]Markdown report:[/] {display_path(report_path)}")
-    console.print(f"[bold]JSON report:[/]     {display_path(json_path)}")
+    console.print(f"[dim]Detailed report: {display_path(report_path)}[/]")
+    if verbose:
+        console.print(f"[bold]JSON report:[/] {display_path(json_path)}")
 
 
 def save_state(state: dict[str, Any], filename: str = "report.json") -> Path:
@@ -194,17 +208,24 @@ def save_state(state: dict[str, Any], filename: str = "report.json") -> Path:
     return path
 
 
-def show_progress(event: dict[str, Any], started: float) -> None:
+def show_progress(event: dict[str, Any], started: float, *, verbose: bool = False) -> None:
     """Render one safe event produced by the sandbox progress adapter."""
-    rendered = progress_message(event)
+    rendered = progress_message(event) if verbose else operator_progress_message(event)
     if rendered is None:
         return
     style, symbol, message = rendered
-    elapsed = time.monotonic() - started
-    console.print(f"[dim]{elapsed:6.1f}s[/] [{style}]{symbol}[/] {escape(message)}")
+    prefix = f"[dim]{time.monotonic() - started:6.1f}s[/] " if verbose else ""
+    console.print(f"{prefix}[{style}]{symbol}[/] {escape(message)}")
 
 
-def run_harness(run: str, symptom: str, started: float, timeout: float = 175) -> int:
+def run_harness(
+    run: str,
+    symptom: str,
+    started: float,
+    timeout: float = 175,
+    *,
+    verbose: bool = False,
+) -> int:
     """Stream the runner's JSONL protocol while retaining an outer hard deadline."""
     command = [
         "docker",
@@ -247,9 +268,9 @@ def run_harness(run: str, symptom: str, started: float, timeout: float = 175) ->
             for _key, _ in selector.select(timeout=min(0.25, remaining)):
                 line = process.stdout.readline()
                 if line:
-                    handle_harness_line(line, started)
+                    handle_harness_line(line, started, verbose=verbose)
         for line in process.stdout:
-            handle_harness_line(line, started)
+            handle_harness_line(line, started, verbose=verbose)
         return process.wait()
     finally:
         selector.close()
@@ -263,14 +284,26 @@ def run_harness(run: str, symptom: str, started: float, timeout: float = 175) ->
                 process.wait()
 
 
-def handle_harness_line(line: str, started: float) -> None:
+def handle_harness_line(line: str, started: float, *, verbose: bool = False) -> None:
     """Accept only the explicit progress protocol; discard runtime diagnostics."""
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
         return
     if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
-        show_progress(event, started)
+        show_progress(event, started, verbose=verbose)
+
+
+def continuation_prompt(run_id: str, message: str) -> str:
+    """Build the bounded context contract for a follow-up investigation."""
+    return (
+        f"This is an explicit follow-up to investigation {run_id}. "
+        "First call get_investigation_state. Prior-run evidence is historical. "
+        "Use evidence_scope='historical' only for retrospective claims. "
+        "For any claim about current target conditions, collect fresh evidence in this child "
+        "investigation and use evidence_scope='current'. "
+        f"Operator follow-up: {message}"
+    )
 
 
 def execute_investigation(
@@ -279,24 +312,39 @@ def execute_investigation(
     prompt: str,
     display_message: str,
     parent_id: str | None = None,
-) -> None:
-    heading = f"[bold]Run[/] {run}"
-    if parent_id is not None:
-        heading += f"\n[bold]Parent[/] {parent_id}"
-    console.print(Panel.fit(f"{heading}\n[dim]{escape(display_message)}[/]", title="Linux OnCall"))
+    *,
+    verbose: bool = False,
+    exit_on_failure: bool = True,
+) -> dict[str, Any] | None:
+    if verbose:
+        heading = f"[bold]Run[/] {run}"
+        if parent_id is not None:
+            heading += f"\n[bold]Parent[/] {parent_id}"
+        console.print(
+            Panel.fit(f"{heading}\n[dim]{escape(display_message)}[/]", title="Linux OnCall")
+        )
     started = time.monotonic()
     try:
-        console.print("\n[bold]Investigation progress[/]")
-        return_code = run_harness(run, prompt, started)
+        return_code = run_harness(run, prompt, started, verbose=verbose)
         if return_code:
             raise RuntimeError(f"Harness exited with {return_code}")
-        state = connection.get("/admin/state").raise_for_status().json()
+        state_value = connection.get("/admin/state").raise_for_status().json()
+        if not isinstance(state_value, dict):
+            raise RuntimeError("Broker returned an invalid investigation state")
+        state: dict[str, Any] = state_value
         if state["status"] == "running":
             raise RuntimeError("Harness returned without an accepted report")
         json_path = save_state(state)
         report_path = json_path.with_name("report.md")
         report_path.write_text(render(state))
-        show_result(state, report_path, json_path, time.monotonic() - started)
+        show_result(
+            state,
+            report_path,
+            json_path,
+            time.monotonic() - started,
+            verbose=verbose,
+        )
+        return state
     except BaseException as error:
         connection.post("/admin/cancel")
         state = connection.get("/admin/state").raise_for_status().json()
@@ -309,7 +357,124 @@ def execute_investigation(
                 border_style="red",
             )
         )
-        raise typer.Exit(1) from error
+        if exit_on_failure:
+            raise typer.Exit(1) from error
+        return None
+
+
+class InteractiveSession:
+    """Operator shell backed by immutable, bounded investigation runs."""
+
+    def __init__(self, connection: httpx.Client, *, verbose: bool = False) -> None:
+        self._connection = connection
+        self._verbose = verbose
+        self._current_run: str | None = None
+
+    def run(self) -> None:
+        console.print("[bold cyan]Linux OnCall[/]")
+        console.print(
+            "Describe the incident. Follow-up messages stay in this incident; "
+            "use [bold]/new[/] to start another."
+        )
+        console.print("[dim]Commands: /new, /status, /verbose, /help, /exit[/]\n")
+        while True:
+            try:
+                message = console.input("[bold cyan]oncall>[/] ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                return
+            if not message:
+                continue
+            if message.startswith("/"):
+                if self._command(message):
+                    return
+                continue
+            self._investigate(message)
+
+    def _command(self, command: str) -> bool:
+        if command in {"/exit", "/quit"}:
+            return True
+        if command == "/new":
+            self._current_run = None
+            console.print("[green]New incident ready.[/]")
+            return False
+        if command == "/status":
+            if self._current_run is None:
+                console.print("[dim]No incident context yet.[/]")
+                return False
+            state = (
+                self._connection.get(f"/admin/runs/{self._current_run}").raise_for_status().json()
+            )
+            report = state.get("report")
+            if isinstance(report, dict):
+                console.print(Panel(escape(str(report["summary"])), title="Latest diagnosis"))
+            else:
+                console.print(f"[dim]Current incident status: {escape(str(state['status']))}[/]")
+            return False
+        if command == "/verbose":
+            self._verbose = not self._verbose
+            mode = "on" if self._verbose else "off"
+            console.print(f"[dim]Technical progress is {mode}.[/]")
+            return False
+        if command == "/help":
+            console.print(
+                "Enter an incident description or follow-up question.\n"
+                "[bold]/new[/] starts a separate incident. [bold]/status[/] shows the latest "
+                "diagnosis. [bold]/verbose[/] toggles technical telemetry. "
+                "[bold]/exit[/] leaves the session."
+            )
+            return False
+        console.print("[yellow]Unknown command. Use /help to list commands.[/]")
+        return False
+
+    def _investigate(self, message: str) -> None:
+        parent_id = self._current_run
+        try:
+            if parent_id is None:
+                response = self._connection.post("/admin/start")
+                prompt = message
+            else:
+                response = self._connection.post(f"/admin/runs/{parent_id}/continue")
+                prompt = continuation_prompt(parent_id, message)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code == 409 and parent_id is not None:
+                console.print(
+                    "[yellow]This incident reached its bounded continuation limit. "
+                    "Use /new to start a fresh incident.[/]"
+                )
+                return
+            console.print(f"[red]Could not start the investigation: {escape(str(error))}[/]")
+            return
+
+        run_id = response.json().get("investigation_id")
+        if not isinstance(run_id, str):
+            console.print("[red]The broker returned an invalid investigation ID.[/]")
+            return
+        state = execute_investigation(
+            self._connection,
+            run_id,
+            prompt,
+            message,
+            parent_id=parent_id,
+            verbose=self._verbose,
+            exit_on_failure=False,
+        )
+        if state is not None:
+            self._current_run = run_id
+
+
+@app.callback()
+def main(
+    context: typer.Context,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Show technical progress and evidence metadata.")
+    ] = False,
+) -> None:
+    """Open an incident session when no subcommand is supplied."""
+    if context.invoked_subcommand is None:
+        with client() as connection:
+            InteractiveSession(connection, verbose=verbose).run()
 
 
 @app.command()
@@ -334,34 +499,40 @@ def doctor() -> None:
 @app.command()
 def investigate(
     symptom: str = "Investigate the target CPU activity and cite evidence.",
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Show technical progress and evidence metadata.")
+    ] = False,
 ) -> None:
     """Start the broker investigation and run the real DSH runtime in its container."""
     with client() as connection:
         response = connection.post("/admin/start")
         response.raise_for_status()
         run = response.json()["investigation_id"]
-        execute_investigation(connection, run, symptom, symptom)
+        execute_investigation(connection, run, symptom, symptom, verbose=verbose)
 
 
 @app.command("continue")
 def continue_investigation(
     run_id: str,
     message: Annotated[str, typer.Option("--message", "-m")],
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Show technical progress and evidence metadata.")
+    ] = False,
 ) -> None:
     """Create an audited child run using prior evidence as historical context."""
     with client() as connection:
         response = connection.post(f"/admin/runs/{run_id}/continue")
         response.raise_for_status()
         run = response.json()["investigation_id"]
-        prompt = (
-            f"This is an explicit follow-up to investigation {run_id}. "
-            "First call get_investigation_state. Prior-run evidence is historical. "
-            "Use evidence_scope='historical' only for retrospective claims. "
-            "For any claim about current target conditions, collect fresh evidence in this child "
-            "investigation and use evidence_scope='current'. "
-            f"Operator follow-up: {message}"
+        prompt = continuation_prompt(run_id, message)
+        execute_investigation(
+            connection,
+            run,
+            prompt,
+            message,
+            parent_id=run_id,
+            verbose=verbose,
         )
-        execute_investigation(connection, run, prompt, message, parent_id=run_id)
 
 
 @app.command()
