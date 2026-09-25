@@ -205,7 +205,7 @@ sequenceDiagram
 
     loop Model step followed by zero or more tools
         H->>B: POST /v1/chat/completions using relay token
-        B->>B: Authenticate; allowlist model fields; cap request
+        B->>B: Authenticate, allowlist model fields, cap request
         B->>M: Fixed-destination model request
         M-->>B: Bounded SSE model response
         B-->>H: Relayed model stream
@@ -235,7 +235,7 @@ sequenceDiagram
     B->>E: Persist accepted terminal report
     B-->>H: Report accepted
     H-->>R: Turn completed
-    R-->>C: Final progress record; container exits
+    R-->>C: Final progress record, container exits
     C->>B: GET /admin/state using admin token
     B->>E: Read authoritative run, evidence and report
     E-->>B: Stored state
@@ -316,7 +316,7 @@ sequenceDiagram
     B->>E: Persist accepted terminal report
     B-->>H: Report accepted
     H-->>R: Turn completed
-    R-->>C: Final progress record; agent container exits
+    R-->>C: Final progress record, agent container exits
     C->>B: GET /admin/state
     B->>E: Read authoritative result
     E-->>B: Stored state
@@ -697,8 +697,7 @@ Evaluation deliberately separates two questions:
 the evidence gates and reproducible bundle. [`aws_day4_trials.py`](../scripts/aws_day4_trials.py) runs
 the substrate matrix. [`evaluate_report.py`](../scripts/evaluate_report.py) scores a model report.
 The methodology and demo sequence are in [Evaluation and demo](evaluation-and-demo.md); measured
-results are in [Day 4 results](day-4-results.md) and
-[Requirements verification](requirements-verification.md).
+results are in [Requirements verification](requirements-verification.md).
 
 ## Level 11: infrastructure as code
 
@@ -720,7 +719,7 @@ ingress rule.
 
 ## Documentation map
 
-The documentation has four roles. Reading a status document as a design spec, or a future plan as
+The documentation has four roles. Reading the phased history as a design spec, or a future plan as
 implemented behavior, creates avoidable confusion.
 
 ```mermaid
@@ -731,7 +730,7 @@ flowchart TD
     Tour --> Semantics[Capabilities + Security<br/>exact contracts]
     Tour --> Operations[README + AWS + Evaluation<br/>how to run it]
     Tour --> Decisions[ADRs<br/>why this shape]
-    Tour --> Evidence[Day 1-4 + verification<br/>what was measured]
+    Tour --> Evidence[Requirements verification<br/>what was measured]
     Tour --> Roadmap[Implementation + hardening<br/>what remains]
 ```
 
@@ -745,10 +744,9 @@ flowchart TD
 | Why were the major choices made? | [Architecture decisions](decisions.md) | ADRs explain separation, evidence immutability, harness choice, and fault strategy |
 | How is AWS provisioned and destroyed? | [AWS and Terraform](aws-terraform.md) | Operator guide for `infra/terraform`, `aws_ssm.py`, and `compose.aws.yaml` |
 | How are scenarios and reports scored? | [Evaluation and demo](evaluation-and-demo.md) | Guide for `faults.py`, `evaluation.py`, and scripts |
-| What was implemented each day? | [Day 1](day-1-status.md), [Day 2](day-2-status.md), [Day 3](day-3-status.md), [Day 4](day-4-results.md) | Historical implementation evidence and measured results |
 | Which requirements have fresh proof? | [Requirements verification](requirements-verification.md) | Commands, outputs, scenario construction, and teardown evidence |
 | What remains before release? | [Release hardening](release-hardening-plan.md) and [pre-matrix review](pre-matrix-architecture-review.md) | Prioritized gaps; do not treat these planned fixes as current behavior |
-| What was the phased build plan? | [Implementation plan](implementation-plan.md) | Completed and open phase checklist |
+| What was implemented in each phase? | [Implementation plan](implementation-plan.md) | Consolidated chronology plus completed and open phase checklist |
 
 ## Source-code map
 
@@ -757,9 +755,9 @@ Use this table when moving from a diagram or behavior to an implementation revie
 | Area | Entry point | Supporting code | Focused tests |
 |---|---|---|---|
 | CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`operator_view.py`](../src/oncall/operator_view.py), [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_operator_view.py`](../tests/test_operator_view.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
-| Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs recorded in Day 1/4 docs |
+| Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs in requirements verification |
 | Broker and model relay | [`broker.py`](../src/oncall/broker.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
-| Deterministic provider fixture | [`fixture_provider.py`](../src/oncall/fixture_provider.py) | Broker relay and real DSH runtime | [`test_broker.py`](../tests/test_broker.py), Day 1 acceptance evidence |
+| Deterministic provider fixture | [`fixture_provider.py`](../src/oncall/fixture_provider.py) | Broker relay and real DSH runtime | [`test_broker.py`](../tests/test_broker.py), fixture acceptance evidence |
 | Application lifecycle | [`service.py`](../src/oncall/service.py) | [`domain.py`](../src/oncall/domain.py) | [`test_service.py`](../tests/test_service.py) |
 | Persistence | [`storage.py`](../src/oncall/storage.py) | Domain evidence/report models | [`test_day3.py`](../tests/test_day3.py), [`test_evaluation.py`](../tests/test_evaluation.py) |
 | Target HTTP service | [`target.py`](../src/oncall/target.py) | [`transport.py`](../src/oncall/transport.py), [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_target.py`](../tests/test_target.py) |
@@ -767,7 +765,7 @@ Use this table when moving from a diagram or behavior to an implementation revie
 | Fault injection | [`faults.py`](../src/oncall/faults.py) | [`lab_fault.py`](../src/oncall/lab_fault.py), [`aws_ssm.py`](../src/oncall/aws_ssm.py) | [`test_evaluation.py`](../tests/test_evaluation.py), AWS acceptance scripts |
 | Evaluation | [`evaluation.py`](../src/oncall/evaluation.py) | [`evaluate_report.py`](../scripts/evaluate_report.py), [`aws_day4_trials.py`](../scripts/aws_day4_trials.py) | [`test_evaluation.py`](../tests/test_evaluation.py) |
 | Local deployment | [`compose.yaml`](../compose.yaml) | [`docker/Dockerfile`](../docker/Dockerfile), [`init_lab.py`](../scripts/init_lab.py) | Compose validation and live local runs |
-| AWS deployment | [`lab/main.tf`](../infra/terraform/environments/lab/main.tf) | [`bootstrap/main.tf`](../infra/terraform/bootstrap/main.tf), [`cloud-init.sh.tftpl`](../infra/terraform/templates/cloud-init.sh.tftpl), [`compose.aws.yaml`](../compose.aws.yaml) | [`aws_acceptance.py`](../scripts/aws_acceptance.py), Day 3/4 acceptance scripts |
+| AWS deployment | [`lab/main.tf`](../infra/terraform/environments/lab/main.tf) | [`bootstrap/main.tf`](../infra/terraform/bootstrap/main.tf), [`cloud-init.sh.tftpl`](../infra/terraform/templates/cloud-init.sh.tftpl), [`compose.aws.yaml`](../compose.aws.yaml) | [`aws_acceptance.py`](../scripts/aws_acceptance.py), repeated acceptance scripts |
 
 ## Suggested review paths
 

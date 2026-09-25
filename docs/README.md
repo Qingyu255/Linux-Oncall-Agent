@@ -1,32 +1,31 @@
 # Design documentation
 
-Status: Day 4 substrate evaluation implemented and verified, 2026-09-24. All 15 repeated AWS
-substrate trials passed, two live-model reports were scored, and the cloud resources were destroyed.
-Repeated live-model report scoring remains open.
+Status: the core diagnostic substrate and interactive CLI are implemented. The retained 2026-09-24
+AWS evaluation passed all 15 substrate trials, scored two live-model reports, and verified teardown.
+The same-model report reliability matrix remains open.
 
 ## Read in this order
 
 | Document | Purpose |
 |---|---|
 | [Architecture tour](architecture-tour.md) | Start here: progressive system explanation, document graph, and source-code map |
-| [Day 4 results](day-4-results.md) | Core review fixes, evaluator, repeated AWS results, limitations and teardown |
-| [Requirements verification](requirements-verification.md) | Fresh command outputs, scenario setup, P0 matrix and teardown proof |
-| [MVP release hardening](release-hardening-plan.md) | Prioritized release gaps, implementation stages and final acceptance gates |
-| [Pre-matrix architecture review](pre-matrix-architecture-review.md) | Code findings and focused Terra OOM/filesystem plus 15-trial execution plan |
-| [Day 3 status](day-3-status.md) | Implemented collectors, loss-aware data path, fault acceptance and teardown proof |
-| [Day 2 status](day-2-status.md) | AWS resources, remote acceptance evidence, defects found and teardown proof |
-| [Day 1 status](day-1-status.md) | Implemented scope, measured acceptance evidence and remaining limitation |
-| [Execution manifest](execution-manifest.md) | Exact Day 1 versions, image IDs, runtime policy and acceptance artifacts |
 | [Requirements](requirements.md) | Product scope, acceptance criteria, full diagnostic backlog |
 | [Architecture](architecture.md) | Deployment, trust boundaries, request flow, investigation lifecycle |
 | [Python design](python-design.md) | Package structure, class responsibilities, contracts, concurrency and storage |
-| [AWS and Terraform](aws-terraform.md) | Resources, IAM, networking, bootstrap, cost and teardown |
 | [Capabilities and evidence](capabilities-and-evidence.md) | Probe catalog, limits, Linux semantics, evidence schemas |
 | [Security and reliability](security-and-reliability.md) | Enforced policy, sandboxing, failure behavior, adversarial tests |
-| [Implementation plan](implementation-plan.md) | Four-day core MVP, optional days, dependency gates and task checklist |
+| [AWS and Terraform](aws-terraform.md) | Resources, IAM, networking, bootstrap, cost and teardown |
 | [Evaluation and demo](evaluation-and-demo.md) | Fault lab, scoring, comparison design and presentation walkthrough |
+| [Requirements verification](requirements-verification.md) | Current checks, retained measurements, P0 matrix and teardown proof |
+| [Implementation plan](implementation-plan.md) | Consolidated phase history, optional work and task checklist |
+| [MVP release hardening](release-hardening-plan.md) | Prioritized release gaps, implementation stages and final acceptance gates |
+| [Pre-matrix architecture review](pre-matrix-architecture-review.md) | Code findings and focused Terra OOM/filesystem plus 15-trial execution plan |
 | [Decisions](decisions.md) | Architecture decisions and when to revisit them |
 | [Source review](source-review.md) | Conversation coverage, changes in direction, verified references and open questions |
+
+The implementation plan is the compact chronology of the four build phases. Requirements verification
+is the single durable record for measured acceptance results; dated per-day status files and the
+machine-specific execution manifest were removed after their useful content was consolidated.
 
 ## Current and recommended scope
 

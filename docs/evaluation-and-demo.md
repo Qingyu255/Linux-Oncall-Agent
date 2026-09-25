@@ -78,7 +78,8 @@ sanitized-artifacts/
 
 The current writer emits the first seven files. Sanitized raw capture is already retained through
 evidence artifact references; copying those artifacts into a portable bundle is a follow-on. See
-[Day 4 results](day-4-results.md) for the repeated substrate measurements and explicit live-model gap.
+[Requirements verification](requirements-verification.md) for the repeated substrate measurements and
+explicit live-model gap.
 
 ## Ten-minute presentation
 

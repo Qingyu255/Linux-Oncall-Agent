@@ -2,6 +2,9 @@
 
 This is a four-day core plan with two optional extension days. Dates are relative so the schedule survives interruptions. Budget roughly 6–8 focused hours per day. If integration takes longer, keep the gates and move dates; do not expand scope to compensate.
 
+This file also preserves the compact implementation chronology. Measured commands, trials, limitations,
+and teardown evidence live in [Requirements verification](requirements-verification.md).
+
 ```mermaid
 flowchart LR
     P0[Compatibility spike] --> P1[CPU vertical slice]
@@ -57,7 +60,7 @@ deduplication, hard limits, CPU attribution, cancellation, broken-tunnel failure
 and sandbox isolation. Terraform then destroyed 14 lab and 11 bootstrap resources; direct AWS
 inventories show no remaining billable project resources. The replacement exposed two bootstrap
 permission defects that are corrected in the final template. Day 3 subsequently passed an unattended
-clean apply with that template; see [Day 2 status](day-2-status.md).
+clean apply with that template; see [Requirements verification](requirements-verification.md).
 
 ## Day 3 — Complete the diagnostic MVP
 
@@ -77,7 +80,7 @@ delta of one with four matching journal entries, and a controlled filesystem wri
 operator runner reset every fault, the full fixture-driven harness report persisted five observations
 and a versioned hypothesis, and direct inventories proved the AWS and Docker environments were
 removed. The fixture validates orchestration rather than model judgment; live-model repeat trials
-remain Day 4 work. See [Day 3 status](day-3-status.md).
+remain open. See [Requirements verification](requirements-verification.md).
 
 ## Day 4 — Reliability, evaluation and presentation
 
@@ -96,7 +99,7 @@ remain Day 4 work. See [Day 3 status](day-3-status.md).
 type boundary now covers the full runtime package, and the evaluator emits reproducible bundles. Live
 DSH/OpenAI runs retained one `gpt-4.1-mini` semantic failure and one passing `gpt-5.6-terra` CPU report.
 R05 is met; repeated model-quality trials required by R16 remain open. See
-[Day 4 results](day-4-results.md).
+[Requirements verification](requirements-verification.md).
 
 ## Optional Day 5 — Baselines and usability
 
