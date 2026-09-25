@@ -1,11 +1,10 @@
 """Operator CLI. Docker authority is here, never exposed as an agent tool."""
 
 import json
-import re
 import selectors
 import subprocess
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -21,6 +20,7 @@ from rich.text import Text
 from oncall.faults import SCENARIOS, FaultController, SsmOperatorExecutor
 from oncall.harness_progress import PROGRESS_PROTOCOL, progress_message
 from oncall.operator_view import operator_progress_message
+from oncall.progress_projection import bounded_assistant_response
 
 app = typer.Typer(
     help="Evidence-driven Linux incident investigation",
@@ -30,28 +30,15 @@ app = typer.Typer(
 ROOT = Path(__file__).resolve().parents[2]
 console = Console()
 
-SESSION_GUIDANCE_QUESTIONS = {
-    "help",
-    "how can you help",
-    "how do i use this",
-    "what can i ask",
-    "what can you do",
-    "what do you do",
-    "what is this",
-    "who are you",
-}
-
-SESSION_GUIDANCE = (
-    "I investigate Linux CPU pressure, memory and cgroup OOM events, filesystem capacity, "
-    "dominant processes, and bounded service logs on the configured target. I compare competing "
-    "causes, cite collected evidence, preserve uncertainty, and keep follow-up questions in the "
-    "same incident.\n\n"
-    "Describe the symptom, affected service, and when it happened. I diagnose through approved "
-    "read-only probes; I do not run arbitrary target commands or remediate the system. Use /help "
-    "for session commands."
-)
 SESSION_COMMAND_SLASHES = str.maketrans({"／": "/", "⁄": "/"})
 DEFAULT_ACTIVITY_MESSAGE = "[cyan]Investigating…[/]"
+
+
+@dataclass(frozen=True)
+class HarnessRunOutcome:
+    return_code: int
+    assistant_response: str | None
+    tool_calls: int
 
 
 def display_path(path: Path) -> str:
@@ -59,16 +46,6 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
-
-
-def session_guidance(message: str) -> str | None:
-    """Answer common shell-orientation prompts without opening an investigation."""
-    normalized = re.sub(r"[^a-z0-9]+", " ", message.casefold()).strip()
-    if normalized in SESSION_GUIDANCE_QUESTIONS:
-        return SESSION_GUIDANCE
-    if normalized in {"hello", "hey", "hi", "hi there"}:
-        return "Hi. Describe the Linux symptom you want me to investigate, or ask what I can do."
-    return None
 
 
 def session_command(message: str) -> str | None:
@@ -91,6 +68,23 @@ def failure_detail(state: dict[str, Any]) -> str:
         return ""
     summary = ", ".join(f"{name} × {count}" for name, count in sorted(counts.items()))
     return f"\nProbe failures: {summary}"
+
+
+def permits_conversational_response(state: dict[str, Any], outcome: HarnessRunOutcome) -> bool:
+    """Allow direct model text only when no diagnostic action was attempted."""
+    events = state.get("events")
+    allowed_events = {"started", "continued_from", "model_request"}
+    return (
+        state.get("status") == "running"
+        and state.get("report") is None
+        and state.get("probe_calls") == 0
+        and not state.get("evidence")
+        and not state.get("hypotheses")
+        and outcome.tool_calls == 0
+        and outcome.assistant_response is not None
+        and isinstance(events, list)
+        and all(isinstance(event, dict) and event.get("kind") in allowed_events for event in events)
+    )
 
 
 def fault_controller(inventory_path: Path) -> FaultController:
@@ -284,7 +278,7 @@ def run_harness(
     *,
     verbose: bool = False,
     activity: Status | None = None,
-) -> int:
+) -> HarnessRunOutcome:
     """Stream the runner's JSONL protocol while retaining an outer hard deadline."""
     command = [
         "docker",
@@ -313,6 +307,22 @@ def run_harness(
     deadline = time.monotonic() + timeout
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ)
+    assistant_response: str | None = None
+    tool_calls = 0
+
+    def consume(line: str) -> None:
+        nonlocal assistant_response, tool_calls
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            event = None
+        if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
+            if event.get("kind") == "tool_started":
+                tool_calls += 1
+        response = handle_harness_line(line, started, verbose=verbose, activity=activity)
+        if response is not None:
+            assistant_response = response
+
     try:
         while process.poll() is None:
             remaining = deadline - time.monotonic()
@@ -327,10 +337,10 @@ def run_harness(
             for _key, _ in selector.select(timeout=min(0.25, remaining)):
                 line = process.stdout.readline()
                 if line:
-                    handle_harness_line(line, started, verbose=verbose, activity=activity)
+                    consume(line)
         for line in process.stdout:
-            handle_harness_line(line, started, verbose=verbose, activity=activity)
-        return process.wait()
+            consume(line)
+        return HarnessRunOutcome(process.wait(), assistant_response, tool_calls)
     finally:
         selector.close()
         process.stdout.close()
@@ -349,14 +359,17 @@ def handle_harness_line(
     *,
     verbose: bool = False,
     activity: Status | None = None,
-) -> None:
+) -> str | None:
     """Accept only the explicit progress protocol; discard runtime diagnostics."""
     try:
         event = json.loads(line)
     except json.JSONDecodeError:
-        return
+        return None
     if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
+        if event.get("kind") == "assistant_response":
+            return bounded_assistant_response(event.get("text"))
         show_progress(event, started, verbose=verbose, activity=activity)
+    return None
 
 
 def continuation_prompt(run_id: str, message: str) -> str:
@@ -380,6 +393,7 @@ def execute_investigation(
     *,
     verbose: bool = False,
     exit_on_failure: bool = True,
+    allow_conversation: bool = False,
 ) -> dict[str, Any] | None:
     if verbose:
         heading = f"[bold]Run[/] {run}"
@@ -394,7 +408,7 @@ def execute_investigation(
         if activity is not None:
             activity.start()
         try:
-            return_code = run_harness(
+            outcome = run_harness(
                 run,
                 prompt,
                 started,
@@ -404,13 +418,18 @@ def execute_investigation(
         finally:
             if activity is not None:
                 activity.stop()
-        if return_code:
-            raise RuntimeError(f"Harness exited with {return_code}")
+        if outcome.return_code:
+            raise RuntimeError(f"Harness exited with {outcome.return_code}")
         state_value = connection.get("/admin/state").raise_for_status().json()
         if not isinstance(state_value, dict):
             raise RuntimeError("Broker returned an invalid investigation state")
         state: dict[str, Any] = state_value
         if state["status"] == "running":
+            if allow_conversation and permits_conversational_response(state, outcome):
+                connection.post("/admin/cancel").raise_for_status()
+                assert outcome.assistant_response is not None
+                console.print(Text(outcome.assistant_response))
+                return None
             raise RuntimeError("Harness returned without an accepted report")
         json_path = save_state(state)
         report_path = json_path.with_name("report.md")
@@ -479,10 +498,6 @@ class InteractiveSession:
             if command is not None:
                 if self._command(command):
                     return
-                continue
-            guidance = session_guidance(message)
-            if guidance is not None:
-                console.print(guidance)
                 continue
             self._investigate(message)
 
@@ -567,6 +582,7 @@ class InteractiveSession:
             parent_id=parent_id,
             verbose=self._verbose,
             exit_on_failure=False,
+            allow_conversation=True,
         )
         if state is not None:
             self._current_run = run_id

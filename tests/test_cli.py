@@ -221,7 +221,7 @@ def test_interactive_session_continues_until_new(monkeypatch):
     assert prompts[2] == ("new-root", "Investigate CPU pressure", None)
 
 
-def test_session_answers_capability_question_without_starting_investigation(monkeypatch):
+def test_session_routes_capability_questions_to_the_agent(monkeypatch):
     output = StringIO()
     test_console = Console(file=output, force_terminal=False, width=100)
     messages = iter(("what can you do?", "Investigate CPU pressure", "/exit"))
@@ -233,18 +233,7 @@ def test_session_answers_capability_question_without_starting_investigation(monk
     monkeypatch.setattr(session, "_investigate", investigations.append)
     session.run()
 
-    rendered = output.getvalue()
-    assert "I investigate Linux CPU pressure" in rendered
-    assert "approved read-only" in rendered
-    assert "probes" in rendered
-    assert investigations == ["Investigate CPU pressure"]
-
-
-def test_session_guidance_does_not_swallow_real_incident_descriptions():
-    assert cli.session_guidance("What can you do?") is not None
-    assert cli.session_guidance("hello!") is not None
-    assert cli.session_guidance("What can you do about this high CPU usage?") is None
-    assert cli.session_guidance("Help investigate errno 28") is None
+    assert investigations == ["what can you do?", "Investigate CPU pressure"]
 
 
 def test_session_command_normalizes_paste_sequences_and_unicode_slashes():
@@ -278,7 +267,11 @@ def test_session_target_discloses_ec2_scope(monkeypatch):
 def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
     output = StringIO()
     monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
-    monkeypatch.setattr(cli, "run_harness", lambda *_args, **_options: 0)
+    monkeypatch.setattr(
+        cli,
+        "run_harness",
+        lambda *_args, **_options: cli.HarnessRunOutcome(0, None, 0),
+    )
     monkeypatch.setattr(cli, "save_state", lambda *_args, **_options: Path("failed-state.json"))
 
     class Response:
@@ -313,6 +306,88 @@ def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
     assert "valid report" in rendered
     assert "Please retry with the Linux symptom" in rendered
     assert "Investigation failed" not in rendered
+
+
+def test_conversational_response_requires_no_diagnostic_actions():
+    state = {
+        "status": "running",
+        "report": None,
+        "probe_calls": 0,
+        "evidence": [],
+        "hypotheses": [],
+        "events": [
+            {"kind": "started"},
+            {"kind": "model_request"},
+        ],
+    }
+    conversation = cli.HarnessRunOutcome(0, "I can investigate Linux incidents.", 0)
+
+    assert cli.permits_conversational_response(state, conversation) is True
+    assert (
+        cli.permits_conversational_response(
+            {**state, "events": [*state["events"], {"kind": "report_rejected"}]},
+            conversation,
+        )
+        is False
+    )
+    assert (
+        cli.permits_conversational_response(
+            state,
+            cli.HarnessRunOutcome(0, "I used a tool.", 1),
+        )
+        is False
+    )
+
+
+def test_interactive_conversational_response_is_rendered_and_run_is_cancelled(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    monkeypatch.setattr(
+        cli,
+        "run_harness",
+        lambda *_args, **_options: cli.HarnessRunOutcome(
+            0,
+            "I can explain [unsafe] Linux diagnostics.",
+            0,
+        ),
+    )
+    posts: list[str] = []
+
+    class Response:
+        def raise_for_status(self):
+            return self
+
+        def json(self):
+            return {
+                "investigation_id": "a" * 32,
+                "status": "running",
+                "report": None,
+                "probe_calls": 0,
+                "evidence": [],
+                "hypotheses": [],
+                "events": [{"kind": "started"}, {"kind": "model_request"}],
+            }
+
+    class Connection:
+        def get(self, _path):
+            return Response()
+
+        def post(self, path):
+            posts.append(path)
+            return Response()
+
+    result = cli.execute_investigation(
+        Connection(),  # type: ignore[arg-type]
+        "a" * 32,
+        "What can you do?",
+        "What can you do?",
+        exit_on_failure=False,
+        allow_conversation=True,
+    )
+
+    assert result is None
+    assert posts == ["/admin/cancel"]
+    assert "I can explain [unsafe] Linux diagnostics." in output.getvalue()
 
 
 def test_quiet_progress_uses_spinner_for_active_probe_and_keeps_result(monkeypatch):

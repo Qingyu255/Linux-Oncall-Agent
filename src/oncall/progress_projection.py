@@ -15,6 +15,7 @@ from oncall.domain import Evidence, Hypothesis
 PROGRESS_PROTOCOL = "oncall-progress-v1"
 MAX_ARGUMENT_BYTES = 16 * 1024
 MAX_RESULT_BYTES = 256 * 1024
+MAX_ASSISTANT_RESPONSE_BYTES = 8 * 1024
 
 TOOL_LABELS = {
     "sample_cpu_pressure": "Sampling CPU pressure",
@@ -112,6 +113,34 @@ def safe_name(value: object, limit: int = 40) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     return SAFE_NAME_PATTERN.sub("?", value[:limit]) or None
+
+
+def bounded_assistant_response(value: object) -> str | None:
+    """Bound terminal assistant text and remove control characters."""
+    if not isinstance(value, str):
+        return None
+    bounded = value.encode("utf-8")[:MAX_ASSISTANT_RESPONSE_BYTES].decode("utf-8", errors="ignore")
+    cleaned = "".join(
+        character
+        for character in bounded
+        if character in {"\n", "\t"} or ord(character) >= 32 and ord(character) != 127
+    ).strip()
+    return cleaned or None
+
+
+def assistant_response_projection(data: dict[str, Any]) -> str | None:
+    """Extract only final-answer text blocks from one assistant message."""
+    message = data.get("message")
+    owner = message if isinstance(message, dict) else data
+    content = owner.get("content")
+    if not isinstance(content, list):
+        return None
+    text = "".join(
+        str(block.get("text") or "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+    return bounded_assistant_response(text)
 
 
 def json_object(value: object, byte_limit: int) -> dict[str, Any] | None:

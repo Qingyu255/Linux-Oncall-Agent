@@ -18,6 +18,7 @@ from oncall.progress_projection import (
     TOOL_LABELS,
     UNITS,
     ToolCall,
+    assistant_response_projection,
     bounded_float,
     bounded_int,
     canonical_rejection,
@@ -42,6 +43,7 @@ class HarnessProgressAdapter:
         self.calls: dict[str, ToolCall] = {}
         self.model_requests = 0
         self.model_retries = 0
+        self.assistant_response: str | None = None
 
     def notification(self, method: str, payload: dict[str, Any]) -> None:
         if method != "session.event":
@@ -55,6 +57,7 @@ class HarnessProgressAdapter:
             self._emit("analysis_started")
         elif kind == "assistant/message":
             self.model_requests += 1
+            self.assistant_response = assistant_response_projection(data)
             response_fields: dict[str, object] = {"request": self.model_requests}
             usage = data.get("usage")
             if isinstance(usage, dict):
@@ -104,6 +107,8 @@ class HarnessProgressAdapter:
             safe_reason = (
                 value if value in {"completed", "cancelled", "interrupted", "error"} else "unknown"
             )
+            if self.assistant_response is not None:
+                self._emit("assistant_response", text=self.assistant_response)
             self._emit(
                 "turn_finished",
                 reason=safe_reason,

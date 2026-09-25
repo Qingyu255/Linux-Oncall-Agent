@@ -5,7 +5,7 @@ from rich.console import Console
 
 import oncall.cli as cli
 from oncall.harness_progress import HarnessProgressAdapter, progress_message
-from oncall.progress_projection import facts_projection
+from oncall.progress_projection import bounded_assistant_response, facts_projection
 
 
 def notification(kind: str, data: dict[str, object]) -> dict[str, object]:
@@ -136,6 +136,40 @@ def test_assistant_content_is_hidden_while_usage_is_counted():
         "magenta",
         "◆",
         "Model response 1 received · 1,200 input tokens · 80 output tokens",
+    )
+
+
+def test_final_assistant_text_crosses_only_through_bounded_response_event():
+    emitted: list[dict[str, object]] = []
+    adapter = HarnessProgressAdapter(emitted.append)
+    adapter.notification(
+        "session.event",
+        notification(
+            "assistant/message",
+            {
+                "message": {
+                    "content": [
+                        {"type": "reasoning", "text": "private chain of thought"},
+                        {"type": "text", "text": "I can investigate Linux incidents.\x1b[31m"},
+                    ]
+                }
+            },
+        ),
+    )
+    adapter.notification(
+        "session.event",
+        notification("turn/end", {"reason": {"kind": "completed"}}),
+    )
+
+    assert emitted[-2] == {
+        "protocol": "oncall-progress-v1",
+        "kind": "assistant_response",
+        "text": "I can investigate Linux incidents.[31m",
+    }
+    assert "private chain of thought" not in str(emitted)
+    assert bounded_assistant_response("safe\x00\x1b[bold]") == "safe[bold]"
+    assert cli.handle_harness_line(json.dumps(emitted[-2]), 0) == (
+        "I can investigate Linux incidents.[31m"
     )
 
 
