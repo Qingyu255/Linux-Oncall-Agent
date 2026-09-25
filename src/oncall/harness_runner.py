@@ -32,7 +32,7 @@ def main() -> None:
     token = secret_file("agent_token")
     harness = DeepSeekHarness(
         provider="oncall-openai",
-        model=os.environ.get("ONCALL_MODEL", "gpt-4.1-mini"),
+        model=os.environ.get("ONCALL_MODEL", "gpt-5.6-terra"),
         max_tokens=2048,
         profile="sdk-minimal",
         patches=("/app/harness/oncall.patch.yml",),
