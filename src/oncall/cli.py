@@ -1,6 +1,7 @@
 """Operator CLI. Docker authority is here, never exposed as an agent tool."""
 
 import json
+import re
 import selectors
 import subprocess
 import time
@@ -28,12 +29,43 @@ app = typer.Typer(
 ROOT = Path(__file__).resolve().parents[2]
 console = Console()
 
+SESSION_GUIDANCE_QUESTIONS = {
+    "help",
+    "how can you help",
+    "how do i use this",
+    "what can i ask",
+    "what can you do",
+    "what do you do",
+    "what is this",
+    "who are you",
+}
+
+SESSION_GUIDANCE = (
+    "I investigate Linux CPU pressure, memory and cgroup OOM events, filesystem capacity, "
+    "dominant processes, and bounded service logs on the configured target. I compare competing "
+    "causes, cite collected evidence, preserve uncertainty, and keep follow-up questions in the "
+    "same incident.\n\n"
+    "Describe the symptom, affected service, and when it happened. I diagnose through approved "
+    "read-only probes; I do not run arbitrary target commands or remediate the system. Use /help "
+    "for session commands."
+)
+
 
 def display_path(path: Path) -> str:
     try:
         return str(path.relative_to(ROOT))
     except ValueError:
         return str(path)
+
+
+def session_guidance(message: str) -> str | None:
+    """Answer common shell-orientation prompts without opening an investigation."""
+    normalized = re.sub(r"[^a-z0-9]+", " ", message.casefold()).strip()
+    if normalized in SESSION_GUIDANCE_QUESTIONS:
+        return SESSION_GUIDANCE
+    if normalized in {"hello", "hey", "hi", "hi there"}:
+        return "Hi. Describe the Linux symptom you want me to investigate, or ask what I can do."
+    return None
 
 
 def failure_detail(state: dict[str, Any]) -> str:
@@ -349,14 +381,26 @@ def execute_investigation(
         connection.post("/admin/cancel")
         state = connection.get("/admin/state").raise_for_status().json()
         failure_path = save_state(state, "failed-state.json")
-        console.print(
-            Panel(
-                f"{escape(str(error))}{failure_detail(state)}\n\n"
-                f"Audit state: {display_path(failure_path)}",
-                title="[bold red]Investigation failed[/]",
-                border_style="red",
+        if verbose:
+            console.print(
+                Panel(
+                    f"{escape(str(error))}{failure_detail(state)}\n\n"
+                    f"Audit state: {display_path(failure_path)}",
+                    title="[bold red]Investigation failed[/]",
+                    border_style="red",
+                )
             )
-        )
+        else:
+            if str(error) == "Harness returned without an accepted report":
+                message = (
+                    "I couldn't complete an evidence-backed diagnosis because the model stopped "
+                    "before submitting a valid report. Please retry with the Linux symptom, "
+                    "affected service, and approximate time."
+                )
+            else:
+                message = f"I couldn't complete the investigation: {error}"
+            console.print(f"[red]✗[/] {escape(message)}")
+            console.print(f"[dim]Failure record: {display_path(failure_path)}[/]")
         if exit_on_failure:
             raise typer.Exit(1) from error
         return None
@@ -388,6 +432,10 @@ class InteractiveSession:
             if message.startswith("/"):
                 if self._command(message):
                     return
+                continue
+            guidance = session_guidance(message)
+            if guidance is not None:
+                console.print(guidance)
                 continue
             self._investigate(message)
 
