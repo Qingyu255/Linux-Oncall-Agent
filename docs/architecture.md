@@ -52,12 +52,13 @@ A thin runner inside the agent container launches the DSH SDK and its child runt
 The runner also consumes DSH's session notification callback and projects it onto a versioned JSONL
 progress channel for the operator CLI. Only lifecycle state, model request/retry counts, allowlisted
 probe parameters, evidence metadata, selected typed facts, hypothesis status, canonical policy
-rejections, and continuation identity relationships cross this channel. Prompts, assistant text and
-reasoning, unrestricted arguments and results, raw artifacts, and unknown tool names are discarded
-inside the agent container. The CLI validates the closed protocol again. Its default view renders only
-meaningful observation actions and interpreted typed facts; `--verbose` exposes the remaining safe
-technical fields. This stream is presentation data; persisted broker events and admitted evidence
-remain authoritative.
+rejections, and continuation identity relationships cross this channel. Prompts, intermediate
+assistant text and reasoning, unrestricted arguments and results, raw artifacts, and unknown tool names
+are discarded inside the agent container. One bounded, control-character-free final assistant response
+may cross for a conversational turn. The CLI renders it only if the broker confirms that the turn used
+no tools and created no evidence, hypothesis, or report attempt; the temporary run is then cancelled and
+does not advance the incident lineage. `--verbose` exposes the remaining safe technical fields. This
+stream is presentation data; persisted broker events and admitted evidence remain authoritative.
 
 ## Remote request flow
 

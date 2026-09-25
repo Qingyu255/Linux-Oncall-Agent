@@ -570,8 +570,9 @@ JSON through [`progress_projection.py`](../src/oncall/progress_projection.py), v
 hypotheses against the domain models, and emits a closed set of fields as JSONL. The projection includes
 model request/retry counts, safe probe parameters, evidence quality, duration and byte count, selected
 typed facts, hypothesis status changes, canonical report rejection reasons, and continuation target/boot
-relationships. It never forwards assistant text or reasoning, prompts, raw artifacts, unrestricted tool
-output, credentials, or unknown tool names.
+relationships. It never forwards reasoning, prompts, raw artifacts, unrestricted tool output,
+credentials, unknown tool names, or intermediate assistant text. It may emit one bounded final text
+response for the CLI's guarded conversational path.
 
 `run_harness()` in [`cli.py`](../src/oncall/cli.py) accepts only that protocol and discards other
 container output. The normal view passes each event through
@@ -580,6 +581,13 @@ turns allowlisted typed facts into short natural-language observations. `--verbo
 `progress_message()` for the full safe technical projection. Both renderers validate projected fields
 again, so a forged protocol line cannot become unrestricted terminal content. The progress stream
 remains presentation data; broker events and admitted evidence are authoritative.
+
+A free-text session turn always reaches the configured model. If the model answers directly, the CLI
+accepts that text only when the broker still shows a running run with zero probes, no evidence, no
+hypotheses, no report attempt, and the harness reports zero tool calls. The response is byte-bounded,
+stripped of terminal control characters, and rendered as plain text. The CLI cancels that temporary run
+and leaves the current incident pointer unchanged. Once any diagnostic action occurs, only an accepted
+broker report can complete the turn.
 
 ## Level 9: persistence and lifecycle
 

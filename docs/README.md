@@ -40,9 +40,10 @@ next gate is to run and human-score the full matrix; substrate passes are not di
 Running `oncall` opens an interactive incident session. The normal terminal view turns safe harness
 events into short operator statements about the observation being made and the typed fact it returned.
 Harness lifecycle events, model counters, timings, byte counts, IDs, and empty transport details stay
-hidden unless the operator enables `/verbose` or passes `--verbose`. Assistant text and reasoning,
-prompts, unrestricted arguments and results, raw evidence, and credentials never cross this terminal
-channel. Complete admitted evidence remains in the final JSON and Markdown reports.
+hidden unless the operator enables `/verbose` or passes `--verbose`. Intermediate assistant text,
+reasoning, prompts, unrestricted arguments and results, raw evidence, and credentials never cross this
+terminal channel. A bounded final assistant response may cross only for a turn that used no tools and
+created no diagnostic state. Complete admitted evidence remains in the final JSON and Markdown reports.
 
 Four focused days is an aggressive target, approximately 24–32 engineering hours, assuming AWS access and a working model credential. Reserve two more days for integration surprises and presentation preparation. Scope should shrink before the execution boundary or evidence quality does.
 

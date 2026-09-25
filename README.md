@@ -91,6 +91,10 @@ hypotheses, and evidence from earlier runs as historical context. It does not re
 reasoning, and any claim about the target's current condition still requires a fresh observation. The
 lineage is available for 24 hours and is limited to five generations; use `/new` after that bound.
 
+Natural questions about the agent or session are answered by the configured model. A direct answer is
+shown only when the turn used no tools and created no evidence, hypotheses, or report attempt; it does
+not advance the incident lineage. `/help` remains the deterministic local command reference.
+
 Use `/status` for the latest diagnosis and `/verbose` to toggle model request counts, timings, evidence
 IDs, byte counts, and other technical telemetry. `oncall --verbose` starts with that view enabled.
 

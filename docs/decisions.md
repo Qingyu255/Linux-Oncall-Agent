@@ -127,3 +127,19 @@ records same-boot versus rebooted status.
 the old transcript. In return, the operational context is explicit, bounded, inspectable, and tied to
 the evidence that actually supports the answer. The session stops accepting follow-ups at the lineage
 bound and directs the operator to `/new`, rather than silently discarding older context.
+
+## ADR-014 — Allow bounded direct answers only before diagnostic action
+
+**Context:** an interactive shell receives both incident descriptions and ordinary questions about its
+capabilities. A local phrase allowlist produced hardcoded answers, while sending every message through
+the investigation contract rejected valid conversational responses that did not call `submit_report`.
+
+**Decision:** every non-command message reaches the configured harness and model. The runner projects
+only the final assistant text, capped at 8 KiB and stripped of terminal control characters. The CLI may
+render it only when no tool was called and the broker records zero probes, no evidence, no hypotheses,
+and no report attempt. It cancels the temporary run and does not move the incident lineage pointer. Any
+turn that begins diagnostic work must finish through the existing validated report contract.
+
+**Tradeoff:** capability questions consume a model request and create a cancelled audit run. In return,
+the answer reflects the active model and system prompt without opening an unrestricted chat channel or
+weakening the evidence requirements for incident conclusions.
