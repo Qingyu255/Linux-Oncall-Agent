@@ -78,6 +78,22 @@ The local target is a real Linux container with `/proc` and cgroup visibility, b
 It is suitable for the healthy, CPU, and unavailable-target demonstrations. The systemd cgroup OOM
 and dedicated-filesystem scenarios require the disposable EC2 target.
 
+Containers are a deployment and isolation choice for the local control plane, not a requirement that
+every diagnosed workload be containerized. The current deployment assumptions are:
+
+| Component | Current runtime | Container required by its design? |
+|---|---|---|
+| CLI | Native process on the operator workstation | No |
+| Broker and evidence store | Long-running local container plus named volume | No; packaged this way for reproducibility and secret/network isolation |
+| Harness and DSH runtime | Ephemeral local container | Yes for the current sandbox boundary; another equivalent sandbox could replace it |
+| Local target | Linux container | Yes for the local lab only |
+| AWS target | Python service installed directly on EC2 and managed by systemd | No |
+| Production target | One bounded probe service per Linux host or equivalent node-level deployment | No; it may be a native service, package, image-baked agent, or Kubernetes DaemonSet |
+
+Collectors assume Linux interfaces such as `/proc`, cgroup v2, `statvfs`, and optionally systemd's
+journal. A target service inside a container observes the namespaces and mounts granted to that
+container. A native systemd service on EC2 observes the host according to its Unix permissions.
+
 ### AWS target topology
 
 The control plane and harness remain local. Terraform replaces the local target container with one
@@ -158,6 +174,155 @@ sequenceDiagram
     C->>B: GET /admin/state
     C->>C: Export JSON and Markdown
     C-->>O: Diagnosis, evidence, limits and report paths
+```
+
+### Complete local Docker request path
+
+The local path keeps every application component on the workstation. Docker Desktop supplies the
+Linux VM on macOS; `agent_net` and `target_net` prevent the harness from bypassing the broker.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor O as Operator
+    participant C as oncall CLI<br/>macOS process
+    participant D as Docker engine
+    participant R as Agent runner<br/>ephemeral container
+    participant H as DSH native runtime<br/>agent container child
+    participant B as Broker API + MCP + relay<br/>broker container
+    participant M as OpenAI API
+    participant T as Target API<br/>target container
+    participant K as Linux procfs/cgroups/filesystem<br/>target namespace
+    participant E as SQLite + artifacts<br/>evidence Docker volume
+    participant F as .local/reports<br/>host filesystem
+
+    O->>C: oncall investigate --symptom ...
+    C->>B: POST /admin/start using admin token
+    B->>E: Insert running investigation
+    C->>D: docker compose run --rm agent
+    D->>R: Create isolated agent container
+    R->>H: Start pinned DSH runtime and session
+
+    loop Model step followed by zero or more tools
+        H->>B: POST /v1/chat/completions using relay token
+        B->>B: Authenticate; allowlist model fields; cap request
+        B->>M: Fixed-destination model request
+        M-->>B: Bounded SSE model response
+        B-->>H: Relayed model stream
+        H-->>R: Session lifecycle notification
+        R-->>C: Sanitized oncall-progress-v1 JSONL on stdout
+
+        opt Model chooses an observation
+            H->>B: Authenticated MCP tool call
+            B->>B: Validate schema, run state, deadline, call and byte budgets
+            B->>T: POST /v1/probe with target token and idempotency key
+            T->>T: Authenticate and select one fixed collector
+            T->>K: Read bounded Linux counters or approved data
+            K-->>T: Kernel/filesystem values
+            T-->>B: Typed Observation plus bounded raw capture
+            B->>E: Write and fsync immutable artifact
+            B->>E: Commit typed Evidence and audit event
+            B-->>H: Facts, limitations, quality and evidence ID
+            H-->>R: Tool lifecycle notifications
+            R-->>C: Safe parameters and selected typed facts
+        end
+    end
+
+    H->>B: update_hypothesis via MCP
+    B->>E: Append hypothesis version
+    H->>B: submit_report with evidence IDs and fact fields
+    B->>B: Validate citations, scope, target, boot and evidence quality
+    B->>E: Persist accepted terminal report
+    B-->>H: Report accepted
+    H-->>R: Turn completed
+    R-->>C: Final progress record; container exits
+    C->>B: GET /admin/state using admin token
+    B->>E: Read authoritative run, evidence and report
+    E-->>B: Stored state
+    B-->>C: Final investigation state
+    C->>F: Write report.json and report.md
+    C-->>O: Render diagnosis, evidence table, limits and paths
+```
+
+### Complete remote Linux request path through AWS SSM
+
+The model, harness, broker, evidence store, and CLI stay local. Only the target observation crosses the
+SSM port-forward. The EC2 target runs the Python probe service directly under systemd; it is not a
+Docker container.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor O as Operator
+    participant C as oncall CLI<br/>macOS process
+    participant D as Docker engine
+    participant R as Agent runner<br/>ephemeral local container
+    participant H as DSH native runtime<br/>agent container child
+    participant B as Broker API + MCP + relay<br/>local container
+    participant M as OpenAI API
+    participant G as Docker host gateway<br/>host.docker.internal:18765
+    participant P as Session Manager plugin<br/>127.0.0.1:18765 on Mac
+    participant S as AWS Systems Manager
+    participant A as SSM Agent<br/>EC2 process
+    participant T as oncall-target.service<br/>127.0.0.1:8765 on EC2
+    participant K as EC2 Linux kernel<br/>procfs, cgroup v2, journal, mounts
+    participant E as SQLite + artifacts<br/>local evidence volume
+    participant F as .local/reports<br/>host filesystem
+
+    O->>P: scripts/aws_lab.sh tunnel
+    P->>S: Start restricted port-forward session
+    S->>A: Bind session to selected managed instance
+
+    O->>C: oncall investigate --symptom ...
+    C->>B: POST /admin/start using admin token
+    B->>E: Insert running investigation
+    C->>D: docker compose run --rm agent
+    D->>R: Create isolated agent container
+    R->>H: Start pinned DSH runtime and session
+
+    loop Model step followed by zero or more tools
+        H->>B: Model request through authenticated relay
+        B->>M: Allowlisted fixed-destination request
+        M-->>B: Bounded SSE response
+        B-->>H: Relayed model stream
+        H-->>R: Session lifecycle notification
+        R-->>C: Sanitized oncall-progress-v1 JSONL
+
+        opt Model chooses an observation
+            H->>B: Authenticated MCP tool call
+            B->>B: Validate schema, authority and budgets
+            B->>G: HTTPS to host.docker.internal:18765<br/>target token + idempotency key
+            G->>P: Deliver to Mac loopback listener
+            P->>S: Encrypted SSM session payload
+            S->>A: Forward session payload
+            A->>T: HTTPS request on EC2 loopback
+            T->>T: Authenticate and select one fixed collector
+            T->>K: Read bounded host-level Linux data
+            K-->>T: Kernel, process, cgroup, journal or filesystem values
+            T-->>A: Typed Observation plus bounded raw capture
+            A-->>S: Return through SSM session
+            S-->>P: Return through Session Manager
+            P-->>G: Return on local port 18765
+            G-->>B: TLS-verified target response
+            B->>E: Fsync artifact, then commit Evidence and audit event
+            B-->>H: Facts, limitations, quality and evidence ID
+            H-->>R: Tool lifecycle notifications
+            R-->>C: Safe progress projection
+        end
+    end
+
+    H->>B: submit_report with evidence citations
+    B->>B: Validate citations, scope, target, boot and quality
+    B->>E: Persist accepted terminal report
+    B-->>H: Report accepted
+    H-->>R: Turn completed
+    R-->>C: Final progress record; agent container exits
+    C->>B: GET /admin/state
+    B->>E: Read authoritative result
+    E-->>B: Stored state
+    B-->>C: Final investigation state
+    C->>F: Write report.json and report.md
+    C-->>O: Render final result
 ```
 
 The CLI orchestration is `investigate()` and `run_harness()` in
