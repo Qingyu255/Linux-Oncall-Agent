@@ -199,9 +199,9 @@ def show_progress(event: dict[str, Any], started: float) -> None:
     rendered = progress_message(event)
     if rendered is None:
         return
-    style, message = rendered
+    style, symbol, message = rendered
     elapsed = time.monotonic() - started
-    console.print(f"[dim]{elapsed:6.1f}s[/] [{style}]●[/] {escape(message)}")
+    console.print(f"[dim]{elapsed:6.1f}s[/] [{style}]{symbol}[/] {escape(message)}")
 
 
 def run_harness(run: str, symptom: str, started: float, timeout: float = 175) -> int:
