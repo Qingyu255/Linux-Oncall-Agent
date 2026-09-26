@@ -36,6 +36,12 @@ def fixture_message(body: dict[str, Any]) -> dict[str, Any]:
         text = json.dumps(results)
         return list(dict.fromkeys(re.findall(r'evidence_id[\\"\s:]+([a-f0-9]{32})', text)))
 
+    skill_name = next((name for name in tools if name == "skill" or name.endswith("__skill")), None)
+    if skill_name is not None:
+        if step == 0:
+            return call("skill", {"name": "linux-cpu-diagnosis"})
+        step -= 1
+
     if step == 0:
         return call("sample_cpu_pressure", {"duration_seconds": 2})
     if step == 1:

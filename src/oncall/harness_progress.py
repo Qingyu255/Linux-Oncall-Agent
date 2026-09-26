@@ -173,6 +173,8 @@ def format_parameters(tool: str, event: dict[str, Any]) -> str:
             parts.append(str(status))
     if tool == "submit_report" and event.get("outcome") in OUTCOMES:
         parts.append(str(event["outcome"]))
+    if tool == "skill" and isinstance(event.get("skill_name"), str):
+        parts.append(str(event["skill_name"]))
     return f" · {' · '.join(parts)}" if parts else ""
 
 

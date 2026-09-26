@@ -18,6 +18,7 @@ MAX_RESULT_BYTES = 256 * 1024
 MAX_ASSISTANT_RESPONSE_BYTES = 8 * 1024
 
 TOOL_LABELS = {
+    "skill": "Loading diagnostic guidance",
     "sample_cpu_pressure": "Sampling CPU pressure",
     "rank_processes": "Ranking CPU-consuming processes",
     "inspect_memory_pressure": "Inspecting host memory pressure",
@@ -28,6 +29,12 @@ TOOL_LABELS = {
     "read_artifact": "Reading a bounded evidence page",
     "update_hypothesis": "Updating a competing hypothesis",
     "submit_report": "Submitting the evidence-cited report",
+}
+SKILL_NAMES = {
+    "linux-incident-triage",
+    "linux-cpu-diagnosis",
+    "linux-memory-oom",
+    "linux-filesystem-diagnosis",
 }
 PROBE_TOOLS = {
     "sample_cpu_pressure",
@@ -188,6 +195,8 @@ def tool_parameters(tool: str, raw: object) -> dict[str, object]:
     if args is None or tool == "harness_tool":
         return {}
     result: dict[str, object] = {}
+    if tool == "skill" and args.get("name") in SKILL_NAMES:
+        result["skill_name"] = args["name"]
     duration = bounded_int(args.get("duration_seconds"), 1, 5)
     limit = bounded_int(args.get("limit"), 1, 500)
     if tool in {"sample_cpu_pressure", "rank_processes", "inspect_cgroup_memory"}:

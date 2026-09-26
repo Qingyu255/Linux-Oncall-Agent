@@ -139,6 +139,53 @@ def test_assistant_content_is_hidden_while_usage_is_counted():
     )
 
 
+def test_projects_only_allowlisted_diagnostic_skill_names():
+    emitted: list[dict[str, object]] = []
+    adapter = HarnessProgressAdapter(emitted.append)
+
+    adapter.notification(
+        "session.event",
+        notification(
+            "tool/call",
+            {
+                "callId": "skill-safe",
+                "name": "skill",
+                "arguments": '{"name":"linux-cpu-diagnosis"}',
+            },
+        ),
+    )
+    adapter.notification(
+        "session.event",
+        notification(
+            "tool/call",
+            {
+                "callId": "skill-unknown",
+                "name": "skill",
+                "arguments": '{"name":"../../private-skill"}',
+            },
+        ),
+    )
+
+    assert emitted == [
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_started",
+            "tool": "skill",
+            "skill_name": "linux-cpu-diagnosis",
+        },
+        {
+            "protocol": "oncall-progress-v1",
+            "kind": "tool_started",
+            "tool": "skill",
+        },
+    ]
+    assert progress_message(emitted[0]) == (
+        "yellow",
+        "→",
+        "Loading diagnostic guidance · linux-cpu-diagnosis",
+    )
+
+
 def test_final_assistant_text_crosses_only_through_bounded_response_event():
     emitted: list[dict[str, object]] = []
     adapter = HarnessProgressAdapter(emitted.append)

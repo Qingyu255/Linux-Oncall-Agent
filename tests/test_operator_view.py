@@ -10,6 +10,12 @@ def test_lifecycle_and_model_events_are_suppressed():
     assert operator_progress_message(event("analysis_started")) is None
     assert operator_progress_message(event("model_response", request=3)) is None
     assert operator_progress_message(event("turn_finished")) is None
+    assert (
+        operator_progress_message(
+            event("tool_started", tool="skill", skill_name="linux-cpu-diagnosis")
+        )
+        is None
+    )
 
 
 def test_filesystem_result_is_natural_and_omits_transport_metadata():
