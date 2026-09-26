@@ -50,8 +50,8 @@ class CountingRegistry:
 @pytest.fixture
 def target_app(monkeypatch):
     registry = CountingRegistry()
-    monkeypatch.setattr(target_module, "default_registry", lambda _: registry)
-    monkeypatch.setattr(target_module, "secret_file", lambda _: "x" * 32)
+    monkeypatch.setattr(target_module, "default_registry", lambda *_args, **_kwargs: registry)
+    monkeypatch.setattr(target_module, "secret_file", lambda *_args, **_kwargs: "x" * 32)
     return target_module.create_app(), registry
 
 

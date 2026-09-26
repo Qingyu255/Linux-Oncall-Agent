@@ -2,7 +2,6 @@
 
 import asyncio
 import hashlib
-import os
 import re
 from collections import OrderedDict
 
@@ -10,12 +9,14 @@ from fastapi import FastAPI, Header, HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from oncall.config import RuntimeConfig
 from oncall.domain import Observation, ProbeRequest
 from oncall.http_boundary import Boundary, secret_file
 from oncall.probes import default_registry
 
 
-def create_app() -> Boundary:
+def create_app(config: RuntimeConfig | None = None) -> Boundary:
+    settings = config or RuntimeConfig.from_env()
     api = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     # Raw artifacts remain bounded, and JSON is compressed only on the trusted
     # broker-to-target link. HTTPX enforces a separate decoded-size limit.
@@ -24,26 +25,32 @@ def create_app() -> Boundary:
         TrustedHostMiddleware,
         allowed_hosts=["target", "localhost", "127.0.0.1", "host.docker.internal"],
     )
-    target_id = os.environ.get("TARGET_ID", "docker-target")
-    registry = default_registry(target_id)
-    slots = asyncio.Semaphore(2)
+    registry = default_registry(
+        settings.target_id,
+        lab_cgroup=settings.lab_cgroup,
+        lab_mount=settings.lab_mount,
+    )
+    slots = asyncio.Semaphore(settings.target_probe_concurrency)
     cache_lock = asyncio.Lock()
     cache: OrderedDict[str, tuple[str, Observation]] = OrderedDict()
     inflight: dict[str, tuple[str, asyncio.Task[Observation]]] = {}
 
     async def execute(request: ProbeRequest, request_id: str) -> Observation:
         try:
-            async with asyncio.timeout(7):
+            async with asyncio.timeout(settings.target_probe_timeout_seconds):
                 async with slots:
                     observation = await registry.collect(request)
-            if len(observation.raw.encode()) > 1024 * 1024:
+            if len(observation.raw.encode()) > settings.target_raw_max_bytes:
                 raise HTTPException(413, "output_limited")
-            if len(observation.model_dump_json().encode()) > 1536 * 1024:
+            if (
+                len(observation.model_dump_json().encode())
+                > settings.target_encoded_response_max_bytes
+            ):
                 raise HTTPException(413, "response_limited")
             fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
             async with cache_lock:
                 cache[request_id] = (fingerprint, observation)
-                while len(cache) > 128:
+                while len(cache) > settings.target_cache_limit:
                     cache.popitem(last=False)
             return observation
         except TimeoutError as error:
@@ -61,7 +68,7 @@ def create_app() -> Boundary:
         return {
             "status": "ok",
             "protocol": 3,
-            "target_id": target_id,
+            "target_id": settings.target_id,
             "capabilities": registry.capabilities,
         }
 
@@ -86,11 +93,15 @@ def create_app() -> Boundary:
                     raise HTTPException(409, "request_id_reused")
                 task = pending[1]
             else:
-                if len(inflight) >= 64:
+                if len(inflight) >= settings.target_inflight_limit:
                     raise HTTPException(429, "too_many_inflight_requests")
                 task = asyncio.create_task(execute(request, request_id))
                 inflight[request_id] = (fingerprint, task)
         # A disconnected client must not cancel the bounded target-side operation.
         return await asyncio.shield(task)
 
-    return Boundary(api, secret_file("target_token"), maximum=4096)
+    return Boundary(
+        api,
+        secret_file("target_token", settings.secrets_dir),
+        maximum=settings.target_request_max_bytes,
+    )

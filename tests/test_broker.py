@@ -1,4 +1,5 @@
 from oncall.broker import provider_payload
+from oncall.config import RuntimeConfig
 
 
 def test_terra_chat_completions_adapts_harness_tool_parameters():
@@ -27,3 +28,11 @@ def test_non_terra_model_retains_allowlisted_temperature():
 
     assert payload["temperature"] == 0.7
     assert "reasoning_effort" not in payload
+
+
+def test_provider_payload_uses_configured_token_limit():
+    config = RuntimeConfig(model_max_tokens=512)
+
+    payload = provider_payload({"model": config.model, "messages": []}, config.model, config)
+
+    assert payload["max_completion_tokens"] == 512

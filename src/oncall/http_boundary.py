@@ -1,15 +1,16 @@
 """Small ASGI authentication/body-size boundary shared by lab services."""
 
-import os
 import secrets
 from pathlib import Path
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from oncall.config import DEFAULT_RUNTIME_CONFIG
 
-def secret_file(name: str) -> str:
-    directory = Path(os.environ.get("ONCALL_SECRETS_DIR", "/run/secrets"))
+
+def secret_file(name: str, directory: Path = DEFAULT_RUNTIME_CONFIG.secrets_dir) -> str:
+    """Read one mounted secret from the configured secrets directory."""
     value = (directory / name).read_text().strip()
     if len(value) < 24:
         raise RuntimeError(f"Missing or short {name} secret")

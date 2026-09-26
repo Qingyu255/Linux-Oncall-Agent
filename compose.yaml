@@ -42,7 +42,7 @@ services:
     mem_limit: 512m
     environment:
       ONCALL_PROVIDER: ${ONCALL_PROVIDER:-fixture}
-      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-4.1-mini}
+      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-5.6-terra}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       target: {condition: service_healthy}
@@ -67,7 +67,7 @@ services:
     cpus: 1.0
     mem_limit: 1536m
     environment:
-      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-4.1-mini}
+      ONCALL_MODEL: ${ONCALL_MODEL:-gpt-5.6-terra}
       HOME: /workspace
     depends_on:
       broker: {condition: service_healthy}

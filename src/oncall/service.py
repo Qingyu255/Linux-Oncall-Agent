@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 from typing import Any, Protocol
 
+from oncall.config import DEFAULT_RUNTIME_CONFIG
 from oncall.domain import (
     Evidence,
     Hypothesis,
@@ -26,18 +27,23 @@ class InvestigationService:
         self,
         target: TargetClient,
         store: EvidenceStore,
-        max_calls: int = 20,
-        timeout: float = 180,
-        continuation_ttl_seconds: float = 24 * 60 * 60,
+        max_calls: int = DEFAULT_RUNTIME_CONFIG.investigation_max_calls,
+        timeout: float = DEFAULT_RUNTIME_CONFIG.investigation_timeout_seconds,
+        continuation_ttl_seconds: float = DEFAULT_RUNTIME_CONFIG.continuation_ttl_seconds,
+        artifact_max_bytes: int = DEFAULT_RUNTIME_CONFIG.investigation_artifact_max_bytes,
+        probe_timeout_seconds: float = DEFAULT_RUNTIME_CONFIG.investigation_probe_timeout_seconds,
+        probe_concurrency: int = DEFAULT_RUNTIME_CONFIG.investigation_probe_concurrency,
     ) -> None:
         self.target, self.store = target, store
         self.max_calls, self.timeout = max_calls, timeout
         self.continuation_ttl_seconds = continuation_ttl_seconds
+        self.artifact_max_bytes = artifact_max_bytes
+        self.probe_timeout_seconds = probe_timeout_seconds
         self.run_id: str | None = None
         self.deadline = 0.0
         self.calls, self.bytes = 0, 0
         self.tasks: set[asyncio.Task[Any]] = set()
-        self.slots = asyncio.Semaphore(2)
+        self.slots = asyncio.Semaphore(probe_concurrency)
         self.identity_checked = False
 
     def begin(self, mode: str, parent_id: str | None = None) -> str:
@@ -105,14 +111,16 @@ class InvestigationService:
         assert task is not None
         self.tasks.add(task)
         try:
-            async with asyncio.timeout(min(8, max(0.01, self.deadline - time.monotonic()))):
+            async with asyncio.timeout(
+                min(self.probe_timeout_seconds, max(0.01, self.deadline - time.monotonic()))
+            ):
                 async with self.slots:
                     self.active()
                     observation = await self.target.collect(request)
             self.active()
             self._validate_continuation_identity(run, observation)
             captured = len(observation.raw.encode("utf-8"))
-            if self.bytes + captured > 10 * 1024 * 1024:
+            if self.bytes + captured > self.artifact_max_bytes:
                 raise PolicyError("Investigation artifact budget exceeded")
             self.bytes += captured
             evidence = self.store.add(run, observation)

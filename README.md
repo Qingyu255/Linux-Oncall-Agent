@@ -62,6 +62,10 @@ Only the broker receives the API key. For Terra, the broker removes the harness'
 temperature and uses `reasoning_effort="none"`, which is required for function tools through Chat
 Completions. Recreate the broker after changing `.env`:
 
+`RuntimeConfig` in `src/oncall/config.py` owns these environment-backed deployment settings and the
+shared runtime defaults. Enforced byte, concurrency, call, and deadline limits are code-owned defaults;
+they are not relaxed through environment variables.
+
 ```bash
 docker compose up -d --no-deps --force-recreate --wait broker
 ```

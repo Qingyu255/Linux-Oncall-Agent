@@ -4,10 +4,11 @@
 
 Use Python 3.12 as the initial application target, `uv` for environments and a committed lockfile, Pydantic for external schemas, Typer for CLI, asyncio for bounded I/O, SQLite for local persistence, HTTPX for target transport, and a small ASGI service for target/broker endpoints. Pin actual compatible versions during Phase 0. Use the official Python MCP SDK behind one adapter. The target wheel should not depend on the harness SDK; split optional dependency groups or packages when packaging makes that necessary.
 
-Current Day 4 layout:
+Current layout:
 
 ```text
 src/oncall/
+  config.py          # immutable runtime defaults and environment parsing
   domain.py          # frozen schemas, evidence, reports, policy errors
   parsers.py         # pure Linux-format parsing functions
   probes.py          # bounded /proc and cgroup observations
@@ -46,6 +47,7 @@ The domain imports neither SDKs nor subprocess/network libraries. Parsers accept
 
 | Component | Responsibility | Deliberately excluded |
 |---|---|---|
+| `RuntimeConfig` | Parse deployment environment once and provide immutable runtime limits | Reading environment variables throughout domain and adapter code |
 | `InvestigationService` | Lifecycle, budgets, cancellation, harness orchestration | Linux parsing and HTTP details |
 | `ProbeService` | Authorize, reserve budget, collect, persist and return evidence | Model reasoning |
 | `PolicyEngine` | Pure decision over caller, capability metadata and request | Executing probes |
@@ -65,6 +67,11 @@ shared lifecycle is enforced: `LinuxProbe`, `JournalReader`, `Sanitizer`, `Opera
 `FaultScenario`. The probe base class applies the Template Method pattern; its subclasses and the
 explicit registry apply Strategy. `FaultController` is a facade around scenario lifecycle. Avoid
 service locators, global mutable registries and inheritance where pure parser functions suffice.
+
+`RuntimeConfig.from_env()` is called only at process composition roots. Broker, target, transport,
+service, probe registry, and harness receive typed values from that immutable object. Deployment
+coordinates and credentials can come from environment variables; security limits stay code-owned and
+can be overridden explicitly in tests without giving the environment authority to relax them.
 
 The installed application boundary retains this structural contract:
 

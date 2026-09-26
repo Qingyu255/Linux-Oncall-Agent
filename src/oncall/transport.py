@@ -6,14 +6,28 @@ from typing import Any
 
 import httpx
 
+from oncall.config import DEFAULT_RUNTIME_CONFIG
 from oncall.domain import Observation, ProbeRequest
 
 
 class HttpTargetClient:
-    def __init__(self, url: str, token: str, ca_file: Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        ca_file: Path | None = None,
+        *,
+        timeout_seconds: float = DEFAULT_RUNTIME_CONFIG.target_http_timeout_seconds,
+        wire_max_bytes: int = DEFAULT_RUNTIME_CONFIG.target_wire_max_bytes,
+        response_max_bytes: int = DEFAULT_RUNTIME_CONFIG.target_response_max_bytes,
+        health_max_bytes: int = DEFAULT_RUNTIME_CONFIG.target_health_max_bytes,
+    ) -> None:
+        self.wire_max_bytes = wire_max_bytes
+        self.response_max_bytes = response_max_bytes
+        self.health_max_bytes = health_max_bytes
         self.client = httpx.AsyncClient(
             base_url=url,
-            timeout=8,
+            timeout=timeout_seconds,
             trust_env=False,
             verify=str(ca_file) if ca_file else True,
             headers={"Authorization": f"Bearer {token}", "Accept-Encoding": "gzip"},
@@ -26,19 +40,19 @@ class HttpTargetClient:
         ) as response:
             response.raise_for_status()
             wire_length = response.headers.get("content-length")
-            if wire_length and int(wire_length) > 1024 * 1024:
+            if wire_length and int(wire_length) > self.wire_max_bytes:
                 raise ValueError("Compressed target response exceeds wire bound")
             data = bytearray()
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
-                if len(data) > 2 * 1024 * 1024:
+                if len(data) > self.response_max_bytes:
                     raise ValueError("Target response exceeds bound")
         return Observation.model_validate_json(data)
 
     async def health(self) -> dict[str, Any]:
         response = await self.client.get("/health")
         response.raise_for_status()
-        if len(response.content) > 4096:
+        if len(response.content) > self.health_max_bytes:
             raise ValueError("Target health response exceeds bound")
         payload = response.json()
         if not isinstance(payload, dict):

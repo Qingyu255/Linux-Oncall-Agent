@@ -1,10 +1,8 @@
 """Composition root: trusted evidence/policy services, MCP and fixed model relay."""
 
 import asyncio
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -13,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
 
+from oncall.config import DEFAULT_RUNTIME_CONFIG, RuntimeConfig
 from oncall.domain import Hypothesis, PolicyError, ProbeRequest, Report
 from oncall.fixture_provider import fixture_message, sse_chunks
 from oncall.http_boundary import Boundary, secret_file
@@ -31,10 +30,15 @@ RELAY_FIELDS = (
 )
 
 
-def provider_payload(body: dict[str, Any], configured_model: str) -> dict[str, Any]:
+def provider_payload(
+    body: dict[str, Any],
+    configured_model: str,
+    config: RuntimeConfig | None = None,
+) -> dict[str, Any]:
     """Allowlist provider fields and apply documented per-model compatibility."""
+    settings = config or DEFAULT_RUNTIME_CONFIG
     allowed = {key: body[key] for key in RELAY_FIELDS if key in body}
-    allowed["max_completion_tokens"] = 2048
+    allowed["max_completion_tokens"] = settings.model_max_tokens
     if configured_model == "gpt-5.6-terra":
         # Terra supports function tools on Chat Completions with reasoning disabled.
         # It accepts only the default temperature, so omit harness sampling values.
@@ -43,17 +47,29 @@ def provider_payload(body: dict[str, Any], configured_model: str) -> dict[str, A
     return allowed
 
 
-def create_app() -> Boundary:
-    target_url = os.environ.get("ONCALL_TARGET_URL", "http://target:8765")
-    ca_value = os.environ.get("ONCALL_TARGET_CA")
+def create_app(config: RuntimeConfig | None = None) -> Boundary:
+    settings = config or RuntimeConfig.from_env()
     target = HttpTargetClient(
-        target_url, secret_file("target_token"), Path(ca_value) if ca_value else None
+        settings.target_url,
+        secret_file("target_token", settings.secrets_dir),
+        settings.target_ca,
+        timeout_seconds=settings.target_http_timeout_seconds,
+        wire_max_bytes=settings.target_wire_max_bytes,
+        response_max_bytes=settings.target_response_max_bytes,
+        health_max_bytes=settings.target_health_max_bytes,
     )
-    store = EvidenceStore(Path(os.environ.get("ONCALL_DATA", "/data")))
-    service = InvestigationService(target, store)
-    mode = os.environ.get("ONCALL_PROVIDER", "fixture")
-    if mode not in {"fixture", "openai"}:
-        raise RuntimeError("Unknown provider mode")
+    store = EvidenceStore(settings.data_dir)
+    service = InvestigationService(
+        target,
+        store,
+        max_calls=settings.investigation_max_calls,
+        timeout=settings.investigation_timeout_seconds,
+        continuation_ttl_seconds=settings.continuation_ttl_seconds,
+        artifact_max_bytes=settings.investigation_artifact_max_bytes,
+        probe_timeout_seconds=settings.investigation_probe_timeout_seconds,
+        probe_concurrency=settings.investigation_probe_concurrency,
+    )
+    mode = settings.provider_mode
     mcp = MCPServer(
         "oncall",
         instructions="Observe through bounded tools. Cite evidence IDs. "
@@ -229,23 +245,26 @@ def create_app() -> Boundary:
         if not isinstance(body, dict):
             raise HTTPException(400, "Provider request must be an object")
         count = model_calls.get(service.run_id, 0)
-        if count >= 12:
+        if count >= settings.model_call_limit:
             raise HTTPException(429, "Model call budget exceeded")
         model_calls[service.run_id] = count + 1
-        configured_model = os.environ.get("ONCALL_MODEL", "gpt-4.1-mini")
+        configured_model = settings.model
         if body.get("model") != configured_model:
             raise HTTPException(400, "Model is not configured")
         store.event(service.run_id, "model_request", {"mode": mode, "model": configured_model})
         if mode == "fixture":
             message = fixture_message(body)
             return StreamingResponse(sse_chunks(body, message), media_type="text/event-stream")
-        key = os.environ.get("OPENAI_API_KEY", "")
+        key = settings.openai_api_key
         if not key:
             raise HTTPException(503, "OPENAI_API_KEY is not configured in broker")
         # Fixed endpoint, allowlisted request fields, bounded output and no redirects.
-        allowed = provider_payload(body, configured_model)
+        allowed = provider_payload(body, configured_model, settings)
 
-        client = httpx.AsyncClient(timeout=60, trust_env=False)
+        client = httpx.AsyncClient(
+            timeout=settings.provider_request_timeout_seconds,
+            trust_env=False,
+        )
         try:
             provider_request = client.build_request(
                 "POST",
@@ -266,11 +285,13 @@ def create_app() -> Boundary:
 
         async def upstream() -> AsyncIterator[bytes]:
             try:
-                async with asyncio.timeout(min(90, state["remaining_seconds"])):
+                async with asyncio.timeout(
+                    min(settings.provider_stream_timeout_seconds, state["remaining_seconds"])
+                ):
                     size = 0
                     async for chunk in response.aiter_bytes():
                         size += len(chunk)
-                        if size > 2 * 1024 * 1024:
+                        if size > settings.provider_response_max_bytes:
                             raise ValueError("Provider response limit")
                         if service.state()["status"] == "cancelled":
                             return
@@ -282,4 +303,9 @@ def create_app() -> Boundary:
         return StreamingResponse(upstream(), media_type="text/event-stream")
 
     api.mount("/", mcp_app)
-    return Boundary(api, secret_file("agent_token"), secret_file("admin_token"))
+    return Boundary(
+        api,
+        secret_file("agent_token", settings.secrets_dir),
+        secret_file("admin_token", settings.secrets_dir),
+        maximum=settings.broker_request_max_bytes,
+    )

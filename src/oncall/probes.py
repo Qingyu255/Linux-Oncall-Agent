@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from oncall.config import DEFAULT_RUNTIME_CONFIG
 from oncall.domain import (
     CgroupMemoryFacts,
     CpuFacts,
@@ -563,16 +564,14 @@ def default_registry(
     target_id: str,
     proc: Path = Path("/proc"),
     cgroup: Path = Path("/sys/fs/cgroup"),
+    lab_cgroup: Path = DEFAULT_RUNTIME_CONFIG.lab_cgroup,
+    lab_mount: Path = DEFAULT_RUNTIME_CONFIG.lab_mount,
 ) -> ProbeRegistry:
     cgroup_root = cgroup.resolve()
     self_relative = parse_self_cgroup(read_bounded(proc / "self/cgroup", 16 * 1024))
     self_cgroup = (cgroup_root / self_relative.lstrip("/")).resolve()
     if not self_cgroup.is_relative_to(cgroup_root):
         raise ValueError("Self cgroup escaped the configured cgroup root")
-    lab_cgroup = Path(
-        os.environ.get("ONCALL_LAB_CGROUP", "/sys/fs/cgroup/oncall.slice/oncall-lab.slice")
-    )
-    lab_mount = Path(os.environ.get("ONCALL_LAB_MOUNT", "/var/lib/oncall-lab/data"))
     probes: tuple[LinuxProbe, ...] = (
         CpuPressureProbe(target_id, proc, self_cgroup),
         ProcessRankingProbe(target_id, proc),
