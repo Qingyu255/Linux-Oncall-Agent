@@ -55,6 +55,12 @@ class Target:
         return observation(request, self.target_id, self.boot_id)
 
 
+@dataclass
+class UnavailableTarget:
+    async def collect(self, request):
+        raise ConnectionError("sensitive transport detail")
+
+
 @pytest.fixture
 def service(tmp_path):
     store = EvidenceStore(tmp_path)
@@ -175,6 +181,48 @@ async def test_expired_deadline_is_not_healthy(service):
     with pytest.raises(PolicyError, match="deadline"):
         await service.probe(ProbeRequest(name="sample_cpu_pressure"))
     assert service.state()["status"] == "inconclusive"
+
+
+async def test_unavailable_target_can_finish_with_zero_claim_inconclusive_report(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(UnavailableTarget(), store)
+    service.begin("test")
+
+    with pytest.raises(ConnectionError):
+        await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+
+    state = service.state()
+    assert state["failure_summary"]["count"] == 1
+    assert state["failure_summary"]["by_type"] == {"ConnectionError": 1}
+    assert state["failure_summary"]["last"]["capability"] == "sample_cpu_pressure"
+    assert "sensitive transport detail" not in str(state["failure_summary"])
+
+    result = service.submit(
+        Report(
+            outcome="inconclusive",
+            summary="The target could not be observed.",
+            claims=(),
+            alternatives=("The target or its transport may be unavailable.",),
+            limitations=("No target observation succeeded.",),
+            next_steps=("Restore target connectivity and retry one bounded probe.",),
+        )
+    )
+
+    assert result["outcome"] == "inconclusive"
+    assert service.state()["report"]["claims"] == []
+    store.close()
+
+
+def test_completed_report_requires_an_evidence_backed_claim():
+    with pytest.raises(ValidationError, match="Completed reports require"):
+        Report(
+            outcome="completed",
+            summary="Unsupported completion",
+            claims=(),
+            alternatives=("Unknown",),
+            limitations=("No evidence",),
+            next_steps=("Collect evidence",),
+        )
 
 
 async def test_corruption_detected(service):

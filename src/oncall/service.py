@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from collections import Counter
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -127,7 +128,15 @@ class InvestigationService:
             self.store.event(run, "evidence_added", {"evidence_id": evidence.evidence_id})
             return evidence
         except BaseException as error:
-            self.store.event(run, "probe_failed", {"type": type(error).__name__})
+            self.store.event(
+                run,
+                "probe_failed",
+                {
+                    "type": type(error).__name__,
+                    "capability": request.name,
+                    "attempt": self.calls,
+                },
+            )
             raise
         finally:
             self.tasks.discard(task)
@@ -225,6 +234,23 @@ class InvestigationService:
 
     def stored_state(self, run: str) -> dict[str, Any]:
         state = self.store.state(run)
+        failures = [event for event in self.store.events(run) if event["kind"] == "probe_failed"]
+        failure_types = Counter(str(event["payload"].get("type", "unknown")) for event in failures)
+        last_failure = failures[-1] if failures else None
+        state["failure_summary"] = {
+            "count": len(failures),
+            "by_type": dict(sorted(failure_types.items())),
+            "last": (
+                {
+                    "time": last_failure["time"],
+                    "type": last_failure["payload"].get("type", "unknown"),
+                    "capability": last_failure["payload"].get("capability"),
+                    "attempt": last_failure["payload"].get("attempt"),
+                }
+                if last_failure
+                else None
+            ),
+        }
         context = self.store.continuation_context(run)
         if context is not None:
             state["continuation"] = context

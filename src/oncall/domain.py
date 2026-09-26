@@ -1,7 +1,7 @@
 """Immutable wire/domain values. No network, harness, or operating-system effects."""
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -269,10 +269,16 @@ class Claim(Value):
 class Report(Value):
     outcome: Literal["completed", "inconclusive"]
     summary: str = Field(min_length=1, max_length=2000)
-    claims: tuple[Claim, ...] = Field(min_length=1, max_length=10)
+    claims: tuple[Claim, ...] = Field(default=(), max_length=10)
     alternatives: tuple[str, ...] = Field(min_length=1, max_length=10)
     limitations: tuple[str, ...] = Field(min_length=1, max_length=10)
     next_steps: tuple[str, ...] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def completed_reports_have_findings(self) -> Self:
+        if self.outcome == "completed" and not self.claims:
+            raise ValueError("Completed reports require at least one evidence-backed claim")
+        return self
 
 
 class PolicyError(ValueError):
