@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from typing import Any, Literal
 
 import httpx
@@ -182,7 +183,7 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
 
     @api.exception_handler(PolicyError)
     async def policy_error(request: Request, error: PolicyError) -> JSONResponse:
-        return JSONResponse({"error": str(error)}, 409)
+        return JSONResponse({"error": str(error)}, HTTPStatus.CONFLICT)
 
     @api.get("/health")
     async def health() -> dict[str, str]:
@@ -201,7 +202,10 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
         try:
             target_state = await target.health()
         except (httpx.HTTPError, OSError, ValueError) as error:
-            raise HTTPException(503, f"Target unavailable: {type(error).__name__}") from error
+            raise HTTPException(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                f"Target unavailable: {type(error).__name__}",
+            ) from error
         return {"status": "ready", "provider_mode": mode, "target": target_state}
 
     @api.post("/admin/cancel")
@@ -214,7 +218,7 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
         try:
             return service.close_run(run_id)
         except ValueError as error:
-            raise HTTPException(404, "Unknown investigation") from error
+            raise HTTPException(HTTPStatus.NOT_FOUND, "Unknown investigation") from error
 
     @api.get("/admin/state")
     async def state() -> dict[str, Any]:
@@ -226,7 +230,7 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
         try:
             return {**service.stored_state(run_id), "events": store.events(run_id)}
         except ValueError as error:
-            raise HTTPException(404, "Unknown investigation") from error
+            raise HTTPException(HTTPStatus.NOT_FOUND, "Unknown investigation") from error
 
     model_calls: dict[str, int] = {}
 
@@ -234,30 +238,33 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
     async def model_relay(request: Request) -> StreamingResponse:
         # After report submission, allow one final model response but no further tools.
         if service.run_id is None:
-            raise HTTPException(409, "No investigation")
+            raise HTTPException(HTTPStatus.CONFLICT, "No investigation")
         state = service.state()
         if (
             state["status"] in {"cancelled", "closed", "failed", "interrupted"}
             or state["remaining_seconds"] <= 0
         ):
-            raise HTTPException(409, "Investigation closed")
+            raise HTTPException(HTTPStatus.CONFLICT, "Investigation closed")
         body = await request.json()
         if not isinstance(body, dict):
-            raise HTTPException(400, "Provider request must be an object")
+            raise HTTPException(HTTPStatus.BAD_REQUEST, "Provider request must be an object")
         count = model_calls.get(service.run_id, 0)
         if count >= settings.model_call_limit:
-            raise HTTPException(429, "Model call budget exceeded")
+            raise HTTPException(HTTPStatus.TOO_MANY_REQUESTS, "Model call budget exceeded")
         model_calls[service.run_id] = count + 1
         configured_model = settings.model
         if body.get("model") != configured_model:
-            raise HTTPException(400, "Model is not configured")
+            raise HTTPException(HTTPStatus.BAD_REQUEST, "Model is not configured")
         store.event(service.run_id, "model_request", {"mode": mode, "model": configured_model})
         if mode == "fixture":
             message = fixture_message(body)
             return StreamingResponse(sse_chunks(body, message), media_type="text/event-stream")
         key = settings.openai_api_key
         if not key:
-            raise HTTPException(503, "OPENAI_API_KEY is not configured in broker")
+            raise HTTPException(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "OPENAI_API_KEY is not configured in broker",
+            )
         # Fixed endpoint, allowlisted request fields, bounded output and no redirects.
         allowed = provider_payload(body, configured_model, settings)
 
@@ -275,13 +282,19 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
             response = await client.send(provider_request, stream=True)
         except httpx.HTTPError as error:
             await client.aclose()
-            raise HTTPException(502, f"OpenAI request failed: {type(error).__name__}") from error
-        if response.status_code != 200:
+            raise HTTPException(
+                HTTPStatus.BAD_GATEWAY,
+                f"OpenAI request failed: {type(error).__name__}",
+            ) from error
+        if response.status_code != HTTPStatus.OK:
             status_code = response.status_code
             # Never relay upstream error bodies or credentials into model logs.
             await response.aclose()
             await client.aclose()
-            raise HTTPException(502, f"OpenAI rejected the request with HTTP {status_code}")
+            raise HTTPException(
+                HTTPStatus.BAD_GATEWAY,
+                f"OpenAI rejected the request with HTTP {status_code}",
+            )
 
         async def upstream() -> AsyncIterator[bytes]:
             try:

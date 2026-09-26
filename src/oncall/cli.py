@@ -5,6 +5,7 @@ import selectors
 import subprocess
 import time
 from dataclasses import asdict, dataclass
+from http import HTTPStatus
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -561,7 +562,7 @@ class InteractiveSession:
                 prompt = continuation_prompt(parent_id, message)
             response.raise_for_status()
         except httpx.HTTPStatusError as error:
-            if error.response.status_code == 409 and parent_id is not None:
+            if error.response.status_code == HTTPStatus.CONFLICT and parent_id is not None:
                 console.print(
                     "[yellow]This incident reached its bounded continuation limit. "
                     "Use /new to start a fresh incident.[/]"

@@ -1,3 +1,4 @@
+from http import HTTPStatus
 from io import StringIO
 from pathlib import Path
 
@@ -182,7 +183,7 @@ def test_interactive_session_continues_until_new(monkeypatch):
     def handler(request):
         requests.append(request.url.path)
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             json={"investigation_id": next(run_ids)},
             request=request,
         )
@@ -249,7 +250,7 @@ def test_session_target_discloses_ec2_scope(monkeypatch):
 
     def handler(request):
         return httpx.Response(
-            200,
+            HTTPStatus.OK,
             json={"target": {"target_id": "i-0123456789abcdef0"}},
             request=request,
         )

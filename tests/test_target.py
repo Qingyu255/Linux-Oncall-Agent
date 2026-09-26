@@ -1,4 +1,5 @@
 import asyncio
+from http import HTTPStatus
 
 import httpx
 import pytest
@@ -65,7 +66,7 @@ async def test_concurrent_idempotent_requests_execute_only_once(target_app):
             client.post("/v1/probe", json={"name": "sample_cpu_pressure"}, headers=headers),
             client.post("/v1/probe", json={"name": "sample_cpu_pressure"}, headers=headers),
         )
-    assert first.status_code == second.status_code == 200
+    assert first.status_code == second.status_code == HTTPStatus.OK
     assert first.json() == second.json()
     assert registry.calls == 1
 
@@ -89,7 +90,7 @@ async def test_conflicting_inflight_id_is_rejected_and_parallelism_is_capped(tar
             json={"name": "sample_cpu_pressure", "duration_seconds": 2},
             headers={**authorization, "Idempotency-Key": "b" * 32},
         )
-        assert conflict.status_code == 409
+        assert conflict.status_code == HTTPStatus.CONFLICT
         await first
         responses = await asyncio.gather(
             *(
@@ -106,9 +107,9 @@ async def test_conflicting_inflight_id_is_rejected_and_parallelism_is_capped(tar
             json={"name": "sample_cpu_pressure"},
             headers={"Authorization": "Bearer wrong", "Idempotency-Key": "f" * 32},
         )
-    assert all(response.status_code == 200 for response in responses)
+    assert all(response.status_code == HTTPStatus.OK for response in responses)
     assert registry.maximum_active == 2
-    assert denied.status_code == 401
+    assert denied.status_code == HTTPStatus.UNAUTHORIZED
 
 
 async def test_client_cancellation_does_not_cancel_bounded_target_work(target_app):
@@ -128,7 +129,7 @@ async def test_client_cancellation_does_not_cancel_bounded_target_work(target_ap
         replay = await client.post(
             "/v1/probe", json={"name": "sample_cpu_pressure"}, headers=headers
         )
-    assert replay.status_code == 200
+    assert replay.status_code == HTTPStatus.OK
     assert registry.calls == 1
 
 

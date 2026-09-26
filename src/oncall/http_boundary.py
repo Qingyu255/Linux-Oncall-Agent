@@ -1,6 +1,7 @@
 """Small ASGI authentication/body-size boundary shared by lab services."""
 
 import secrets
+from http import HTTPStatus
 from pathlib import Path
 
 from starlette.responses import JSONResponse
@@ -35,7 +36,9 @@ class Boundary:
             token = self.admin_token if path.startswith("/admin/") else self.token
             provided = dict(scope["headers"]).get(b"authorization", b"").decode()
             if token is None or not secrets.compare_digest(provided, f"Bearer {token}"):
-                return await JSONResponse({"error": "unauthorized"}, 401)(scope, receive, send)
+                return await JSONResponse({"error": "unauthorized"}, HTTPStatus.UNAUTHORIZED)(
+                    scope, receive, send
+                )
         body = bytearray()
         while True:
             event = await receive()
@@ -43,7 +46,9 @@ class Boundary:
                 return
             body.extend(event.get("body", b""))
             if len(body) > self.maximum:
-                return await JSONResponse({"error": "body_limit"}, 413)(scope, receive, send)
+                return await JSONResponse(
+                    {"error": "body_limit"}, HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+                )(scope, receive, send)
             if not event.get("more_body", False):
                 break
         delivered = False

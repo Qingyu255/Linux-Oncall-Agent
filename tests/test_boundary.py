@@ -1,3 +1,5 @@
+from http import HTTPStatus
+
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -24,8 +26,14 @@ async def test_agent_cannot_administer_or_send_oversized_body(boundary):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=boundary), base_url="http://test"
     ) as client:
-        assert (await client.post("/probe", json={})).status_code == 401
+        assert (await client.post("/probe", json={})).status_code == HTTPStatus.UNAUTHORIZED
         headers = {"Authorization": "Bearer agent-secret"}
-        assert (await client.post("/admin/start", headers=headers)).status_code == 401
-        assert (await client.post("/probe", json={"x": "y"}, headers=headers)).status_code == 200
-        assert (await client.post("/probe", content="x" * 33, headers=headers)).status_code == 413
+        assert (
+            await client.post("/admin/start", headers=headers)
+        ).status_code == HTTPStatus.UNAUTHORIZED
+        assert (
+            await client.post("/probe", json={"x": "y"}, headers=headers)
+        ).status_code == HTTPStatus.OK
+        assert (
+            await client.post("/probe", content="x" * 33, headers=headers)
+        ).status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE
