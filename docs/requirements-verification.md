@@ -1,16 +1,16 @@
-# Requirements verification — 2026-09-24
+# Requirements verification
 
-This document records the executable verification run after the Day 4 core review and CLI display
-work. It separates fresh checks, retained measured trials, and incomplete release gates. All incident
-data is synthetic. No credential value appears in this file.
+This is the durable verification record. It separates current repository checks from the retained
+2026-09-24 AWS and live-model acceptance evidence and from incomplete release gates. All incident data
+is synthetic. No credential value appears in this file.
 
 ## Verification flow
 
 ```mermaid
 flowchart LR
     Install[Frozen dependency install] --> Static[Lint, format, types, build]
-    Static --> Unit[37 parser, policy, lifecycle and boundary tests]
-    Unit --> Local[Fresh Docker fixture investigation]
+    Static --> Unit[Parser, policy, lifecycle and boundary tests]
+    Unit --> Local[Docker fixture investigation]
     Local --> Failure[Unavailable-target control]
     Local --> Sandbox[Agent isolation checks]
     History[AWS 15-trial artifact] --> Matrix[Requirement matrix]
@@ -20,29 +20,46 @@ flowchart LR
     Matrix --> Teardown[Docker and AWS inventories empty]
 ```
 
-## Fresh command results
+## Current repository checks — 2026-09-26
+
+| Check | Command | Result |
+|---|---|---|
+| Lint | `.venv/bin/ruff check src tests scripts` | `All checks passed!` |
+| Formatting | `.venv/bin/ruff format --check src tests scripts` | Pass |
+| Strict typing | `.venv/bin/mypy` | Pass over the complete runtime package |
+| Automated tests | `.venv/bin/pytest -q` | `72 passed` |
+| Package | `.venv/bin/python -m build --no-isolation` | sdist and wheel built successfully |
+| Compose | `docker compose --profile agent config --quiet` | Pass |
+| Container smoke | fixture-mode `oncall doctor` and `oncall investigate` | Readiness and accepted report passed through rebuilt target, broker, and agent images |
+
+The suite covers malformed schemas, policy and artifact ownership, UTF-8 paging, hypothesis versioning,
+citation validation, storage recovery, deadlines, cancellation, concurrent budgets, target concurrency,
+in-flight idempotency, disconnect shielding, credentials, byte integrity, fault lifecycle, evaluator
+controls, provider adaptation, runtime configuration, interactive sessions, and terminal redaction.
+
+## Retained platform checks — 2026-09-24
+
+These commands were run against the acceptance revision. Their outputs are historical evidence rather
+than claims about the current uncommitted worktree.
 
 | Check | Command | Result |
 |---|---|---|
 | Frozen install | `uv sync --frozen --all-extras --dev` | Pass; project rebuilt and installed from the lockfile |
-| Lint | `.venv/bin/ruff check src tests scripts` | `All checks passed!` |
-| Formatting | `.venv/bin/ruff format --check src tests scripts` | `30 files already formatted` |
-| Strict typing | `.venv/bin/mypy` | `Success: no issues found in 17 source files` |
-| Automated tests | `.venv/bin/pytest -q` | `37 passed in 0.95s` |
-| Package | `.venv/bin/python -m build --no-isolation` | sdist and wheel built successfully |
-| Compose | `docker compose --profile agent config --quiet` | Pass |
 | Terraform format | `terraform fmt -check -recursive infra/terraform` | Pass |
 | Bootstrap Terraform | `terraform validate` in `infra/terraform/bootstrap` | `Success! The configuration is valid.` |
 | Lab Terraform | `terraform validate` in `infra/terraform/environments/lab` | `Success! The configuration is valid.` |
 | CLI contract | `.venv/bin/oncall investigate --help` | `--symptom` present with its documented default |
 
-The 37 tests include malformed schemas, policy and artifact ownership, UTF-8 paging, hypothesis
-versioning, citation validation, storage recovery, deadlines, cancellation, concurrent budget
-reservation, target concurrency of two, in-flight idempotency, disconnect shielding, wrong target
-credentials, observation byte integrity, fault readiness/cleanup plans, evaluator controls, Terra
-provider adaptation, and terminal-summary redaction.
+## Retained correctness hardening
 
-## Fresh local end-to-end evidence
+The acceptance review corrected cgroup discovery and field scope, filesystem read-only semantics,
+observation byte and type validation, in-flight request deduplication, disconnect shielding, evidence
+byte accounting, OOM baseline comparison and cleanup, SSM polling and tunnel cleanup, atomic enrollment
+secret writes, and provider error handling before an HTTP stream begins. The evidence, probe, parser,
+and policy contracts advanced to version 3. Detailed invariants remain in
+[Security and reliability](security-and-reliability.md), [Python design](python-design.md), and tests.
+
+## Retained local end-to-end evidence — 2026-09-24
 
 The lab was rebuilt from current source and started in keyless fixture mode. `oncall doctor` reported:
 
@@ -82,7 +99,7 @@ failures, saved `failed-state.json`, and did not emit a healthy report. The targ
 `oncall doctor` returned ready again. This is an explicit failed investigation rather than an
 inconclusive report because the report schema currently requires at least one evidence-backed claim.
 
-## Fresh sandbox boundary evidence
+## Retained sandbox boundary evidence — 2026-09-24
 
 The untrusted agent container passed these assertions:
 
@@ -121,9 +138,9 @@ repetitions of each scenario on a disposable `t3.micro`:
 
 | Scenario | Result | Independent condition check |
 |---|---:|---|
-| CPU | 3/3 | 100% host busy and one dominant worker near 100% of one core |
-| Cgroup OOM | 3/3 | New operator truth counters `(0,1)`, `(1,2)`, `(2,3)` at a 48 MiB limit |
-| Filesystem full | 3/3 | Controlled write `errno 28`; 4,190,208 bytes remained |
+| CPU | 3/3 | 100% host busy; dominant workers used 100.4871%, 100.4545%, and 100.4879% of one core |
+| Cgroup OOM | 3/3 | New operator truth counters `(0,1)`, `(1,2)`, `(2,3)` at a 50,331,648-byte limit |
+| Filesystem full | 3/3 | Controlled write `errno 28`; 4,190,208 bytes remained and 950,210,560 were available after cleanup |
 | Healthy | 3/3 | Host busy 0–0.5%; self-cgroup OOM delta zero |
 | Unavailable | 3/3 | Closed SSM tunnel returned bounded `ConnectError` |
 
@@ -161,10 +178,10 @@ no mutation capability. AWS `lab-start` accepts only `cpu`, `memory`, or `filesy
 | R11 | Pass | Policy, privilege, sensitivity, duration, output, concurrency, and target caps are enforced outside the model |
 | R12 | Pass | Budget/cancellation tests and disconnect-shielded target execution pass |
 | R13 | Pass | Fresh unavailable run retained five `ConnectError` events and no fabricated report |
-| R14 | Pass | Clean AWS apply, replacement, second clean deployment, and destroy were exercised in Days 2–4 |
+| R14 | Pass | Clean AWS apply, replacement, second clean deployment, and destroy were exercised during staged acceptance |
 | R15 | Pass | CPU/OOM/filesystem setup, independent readiness, TTL, reset, and cleanup passed repeatedly |
 | R16 | Partial | Raw repeated substrate trials and scored live bundles exist; the 15-report same-model matrix is incomplete |
-| R17 | Pass | 37 tests, Ruff, strict mypy over 17 modules, and package build pass |
+| R17 | Pass | Current tests, Ruff, and strict mypy pass; the acceptance revision also passed package build |
 | R18 | Pass | README quick start/teardown, Mermaid designs, ADRs, demo plan, measured results, and this matrix exist |
 
 P1 requirements R19–R22 and P2 requirements R23–R24 remain follow-on scope and were not relabelled as
