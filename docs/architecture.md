@@ -135,4 +135,9 @@ target identity and records whether the boot ID is unchanged or rebooted. Contin
 
 ## Extension path
 
-Keep the same domain contracts when replacing the harness, moving the controller to a separate EC2 instance, or adding a remote artifact store. Add multi-user identity, mTLS lifecycle, production log handling, fleet scheduling and stronger sandbox isolation only after the single-host MVP is working. A container separates resources and credentials but shares a kernel with its Linux host; do not describe it as a formally verified hostile-code boundary.
+Keep the same domain contracts when replacing the harness, moving the controller to a hosted service,
+or adding a remote artifact store. The [production reference architecture](production-architecture.md)
+describes a regional control plane, outbound target connectivity, durable evidence services, fleet
+scheduling, and multi-user identity. Add those capabilities only after the single-host MVP is working.
+A container separates resources and credentials but shares a kernel with its Linux host; do not
+describe it as a formally verified hostile-code boundary.

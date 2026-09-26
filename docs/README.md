@@ -11,6 +11,7 @@ The same-model report reliability matrix remains open.
 | [Architecture tour](architecture-tour.md) | Start here: progressive system explanation, document graph, and source-code map |
 | [Requirements](requirements.md) | Product scope, acceptance criteria, full diagnostic backlog |
 | [Architecture](architecture.md) | Deployment, trust boundaries, request flow, investigation lifecycle |
+| [Production reference architecture](production-architecture.md) | Hosted control plane, fleet connectivity, identity, storage, scaling, and the path from the MVP |
 | [Python design](python-design.md) | Package structure, class responsibilities, contracts, concurrency and storage |
 | [Capabilities and evidence](capabilities-and-evidence.md) | Probe catalog, limits, Linux semantics, evidence schemas |
 | [Security and reliability](security-and-reliability.md) | Enforced policy, sandboxing, failure behavior, adversarial tests |

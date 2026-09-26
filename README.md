@@ -16,6 +16,7 @@ The agent chooses what to inspect and compares competing explanations. Trusted c
 | Understand every probe and evidence type | [Capabilities and evidence](docs/capabilities-and-evidence.md) |
 | Review the Python architecture and source map | [Python design](docs/python-design.md) |
 | Review trust boundaries and failure handling | [Security and reliability](docs/security-and-reliability.md) |
+| See how the MVP could become a hosted fleet service | [Production reference architecture](docs/production-architecture.md) |
 | See measured checks and known gaps | [Requirements verification](docs/requirements-verification.md) |
 | Browse every design document | [Documentation index](docs/README.md) |
 
