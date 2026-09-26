@@ -1,5 +1,6 @@
 services:
   broker:
+    depends_on: !reset {}
     environment:
       ONCALL_TARGET_URL: https://host.docker.internal:18765
       ONCALL_TARGET_CA: /run/secrets/target_ca

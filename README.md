@@ -141,7 +141,7 @@ Keep the tunnel open in a dedicated terminal:
 scripts/aws_lab.sh tunnel
 ```
 
-In another terminal, point the broker at the tunnel and verify that `doctor` reports the EC2 instance rather than `docker-target`:
+In another terminal, start only the local broker, point it at the tunnel, and verify that `doctor` reports the EC2 instance rather than `docker-target`. The EC2 target was already created by `setup`; Compose does not provision it:
 
 ```bash
 docker compose -f compose.yaml -f compose.aws.yaml \
