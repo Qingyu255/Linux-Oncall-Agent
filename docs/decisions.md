@@ -1,6 +1,6 @@
 # Architecture decision records
 
-ADRs 001–012 shape the implemented Day 4 substrate. Revisit decisions using evidence and update this file
+ADRs 001–015 shape the implemented substrate. Revisit decisions using evidence and update this file
 when choices change.
 
 ## ADR-001 — Keep reasoning off the target
@@ -143,3 +143,21 @@ turn that begins diagnostic work must finish through the existing validated repo
 **Tradeoff:** capability questions consume a model request and create a cancelled audit run. In return,
 the answer reflects the active model and system prompt without opening an unrestricted chat channel or
 weakening the evidence requirements for incident conclusions.
+
+## ADR-015 — Load diagnostic expertise on demand
+
+**Context:** the initial `harness/skills/*.md` files were maintainer notes rather than discoverable DSH
+skills. Resource-specific guidance lived in one long prompt, so every turn paid for every diagnostic
+domain and runtime selection could not be tested independently.
+
+**Decision:** install DSH's skill catalog, filesystem discovery, and skill tool plugins on top of the
+minimal profile. Disable default discovery roots and expose only validated bundles under
+`/app/harness/skills`. Keep universal authority and reporting constraints in a small base prompt. Load
+triage guidance for incidents and resource-specific CPU, memory/OOM, or filesystem guidance only when
+its description matches. Treat every skill as advisory; MCP schemas, broker policy, target bounds, and
+report validation remain the enforcement boundary.
+
+**Tradeoff:** skill selection adds a model tool call and creates another versioned input to evaluate.
+It reduces unrelated context and makes expertise modular, but it cannot guarantee correct reasoning.
+The fixture verifies discovery and loading; held-out live-model trials must measure selection,
+diagnostic quality, probe economy, and stopping behavior.

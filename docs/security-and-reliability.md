@@ -39,7 +39,7 @@ Future approvals bind the exact capability, target/boot ID, PID/start ticks, arg
 
 | Failure | Required response |
 |---|---|
-| Target unreachable / tunnel lost | Bounded reconnect; preserve evidence; conclude unavailable/inconclusive |
+| Target unreachable / tunnel lost | Retry only within the run budget; after two equivalent failures stop probing, preserve the sanitized failure summary, and submit a zero-claim inconclusive report |
 | Probe timeout | Terminate process group and reap; mark partial capture explicitly |
 | Controller dies | Target deadline still stops work; persisted run becomes interrupted |
 | Harness/model fails or rate-limits | Bounded retry within run budget; export available evidence without fabricated diagnosis |

@@ -27,7 +27,7 @@ flowchart LR
 | Lint | `.venv/bin/ruff check src tests scripts` | `All checks passed!` |
 | Formatting | `.venv/bin/ruff format --check src tests scripts` | Pass |
 | Strict typing | `.venv/bin/mypy` | Pass over the complete runtime package |
-| Automated tests | `.venv/bin/pytest -q` | `72 passed` |
+| Automated tests | `.venv/bin/pytest -q` | `77 passed` |
 | Package | `.venv/bin/python -m build --no-isolation` | sdist and wheel built successfully |
 | Compose | `docker compose --profile agent config --quiet` | Pass |
 | Container smoke | fixture-mode `oncall doctor` and `oncall investigate` | Readiness and accepted report passed through rebuilt target, broker, and agent images |
@@ -35,7 +35,8 @@ flowchart LR
 The suite covers malformed schemas, policy and artifact ownership, UTF-8 paging, hypothesis versioning,
 citation validation, storage recovery, deadlines, cancellation, concurrent budgets, target concurrency,
 in-flight idempotency, disconnect shielding, credentials, byte integrity, fault lifecycle, evaluator
-controls, provider adaptation, runtime configuration, interactive sessions, and terminal redaction.
+controls, provider adaptation, runtime configuration, interactive sessions, terminal redaction,
+isolated skill discovery, safe skill progress, and evidence-free unavailable conclusions.
 
 ## Retained platform checks — 2026-09-24
 
@@ -95,9 +96,10 @@ stored under `.local/reports/83df0d492d504051922990e0f8bc797d/`.
 
 For the unavailable control, the target container was stopped while the broker and agent remained up.
 Run `e2f260ca5a6d46cdb0ae4108f76389a8` produced no evidence, recorded five bounded `ConnectError` probe
-failures, saved `failed-state.json`, and did not emit a healthy report. The target was restarted and
-`oncall doctor` returned ready again. This is an explicit failed investigation rather than an
-inconclusive report because the report schema currently requires at least one evidence-backed claim.
+failures, and saved `failed-state.json`; it did not emit a healthy report. That retained run predates
+the zero-claim inconclusive contract. The current schema accepts an `inconclusive` report without a
+claim when every observation fails, while still rejecting a claim-free `completed` report. The target
+was restarted and `oncall doctor` returned ready again.
 
 ## Retained sandbox boundary evidence — 2026-09-24
 

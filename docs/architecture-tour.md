@@ -561,8 +561,15 @@ SDK with the profile patch in [`harness/oncall.patch.yml`](../harness/oncall.pat
 - disables DeepSeek provider and session-upload plugins;
 - installs the OpenAI-compatible provider pointed at the broker relay;
 - installs the oncall MCP client pointed at the broker;
-- provides the diagnostic system prompt;
+- installs the DSH skill catalog, filesystem discovery, and skill tool plugins;
+- restricts skill discovery to [`harness/skills`](../harness/skills) and provides a small routing prompt;
 - keeps only a local sandbox shell, which is not the target shell.
+
+The catalog initially exposes skill names and descriptions. The model loads the triage method and only
+the resource guidance relevant to the symptom, keeping CPU, memory/OOM, and filesystem semantics out
+of unrelated turns. Skills are advisory: all authority and validation remain in the broker and target.
+The complete boundary and extension rules are in
+[Harness skills and tool design](harness-skills-and-tools.md).
 
 DSH's notification callback contains assistant content and complete tool data. The
 `HarnessProgressAdapter` in [`harness_progress.py`](../src/oncall/harness_progress.py) parses bounded

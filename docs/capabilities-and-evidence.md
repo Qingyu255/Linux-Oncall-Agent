@@ -13,7 +13,7 @@ Limits below are proposed defaults and hard maxima must be configured on the tar
 | `inspect_filesystem` | Approved `root` or `lab` mount | Total/available blocks and inodes; read-only flag scoped to the probe namespace |
 | `query_service_journal` | Approved unit; max 15-minute window, 500 lines, 256 KiB | Journal artifact and parsed events; no global unbounded log query |
 | `read_artifact` | Investigation-owned ID; max 16 KiB per call | Sanitized text with byte/line bounds and digest |
-| `get_investigation_state` | Current session | Evidence index, hypotheses, unknowns and remaining budget |
+| `get_investigation_state` | Current session | Evidence index, hypotheses, sanitized probe-failure summary, lineage, unknowns and remaining budget |
 | `update_hypothesis` | Validated claim and evidence IDs | Versioned interpretation; cannot write evidence facts |
 | `submit_report` | Structured report with citations | Validated report or actionable schema/reference errors |
 
@@ -62,6 +62,11 @@ Raw data stays in the trusted store with restrictive permissions. Sanitization p
 A hypothesis has ID, claim, qualitative status (`open`, `supported`, `weakened`, `rejected`), supporting/contradicting evidence IDs and unresolved questions. Numeric confidence is deferred until calibrated. An evidence reference proves provenance, not causality.
 
 Final report fields: target/interval, outcome, primary finding, supporting citations, alternative explanations, limitations, next recommended probes/actions, and run metrics. Findings cite evidence ID plus field or sanitized artifact line range. Each claim declares `evidence_scope` as `current` or `historical`. A current claim can cite only evidence collected by that run. A historical claim can cite only evidence from its explicit parent lineage. Unsupported references and unrelated cross-investigation citations fail validation. Semantic support is evaluated separately by the rubric.
+
+A `completed` report requires at least one evidence-backed claim. An `inconclusive` report may contain
+zero claims when every observation failed; it must still preserve alternatives, limitations, and a
+next step. The state failure summary exposes only exception class, capability, attempt, count, and
+time, never raw transport text.
 
 An explicit continuation is a new child investigation. Its state includes the parent report,
 hypotheses, historical evidence, source run IDs, and evidence ages. The first current observation must

@@ -13,6 +13,7 @@ The same-model report reliability matrix remains open.
 | [Architecture](architecture.md) | Deployment, trust boundaries, request flow, investigation lifecycle |
 | [Production reference architecture](production-architecture.md) | Hosted control plane, fleet connectivity, identity, storage, scaling, and the path from the MVP |
 | [Python design](python-design.md) | Package structure, class responsibilities, contracts, concurrency and storage |
+| [Harness skills and tools](harness-skills-and-tools.md) | Skill discovery, progressive disclosure, tool semantics, enforcement boundaries, and validation |
 | [Capabilities and evidence](capabilities-and-evidence.md) | Probe catalog, limits, Linux semantics, evidence schemas |
 | [Security and reliability](security-and-reliability.md) | Enforced policy, sandboxing, failure behavior, adversarial tests |
 | [AWS and Terraform](aws-terraform.md) | Resources, IAM, networking, bootstrap, cost and teardown |
