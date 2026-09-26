@@ -1,56 +1,87 @@
 # Linux OnCall Agent
 
-An evidence-driven Linux incident investigation system: a general-purpose agent reasons in its own sandbox and observes a target through typed, bounded diagnostic capabilities.
+An evidence-driven Linux incident investigator that lets an AI agent adapt its diagnostic path without giving it a shell on the target.
 
-The project explores Linux diagnostics, Python domain design, constrained remote execution, and reproducible agent evaluation. It diagnoses; it does not autonomously remediate.
+I built Linux OnCall Agent to explore a practical systems question: how can an agent investigate a real Linux failure while the surrounding software still enforces authorization, time limits, output limits, and evidence quality? The result is a small end-to-end system for diagnosing CPU pressure, cgroup OOM events, filesystem exhaustion, and selected service failures on either a local Docker target or a disposable EC2 instance.
 
-**Status:** Day 4 substrate reliability is implemented and verified. CPU, cgroup OOM, filesystem,
-healthy, and unavailable scenarios each passed three AWS trials. The evaluator separates mechanical
-evidence gates from human diagnostic review. Live DSH/OpenAI runs now include a passing
-`gpt-5.6-terra` CPU diagnosis and a retained `gpt-4.1-mini` semantic failure. The repeated
-report-quality matrix remains open.
+The agent chooses what to inspect and compares competing explanations. Trusted code decides what it may observe, performs typed read-only probes, stores the raw evidence, and checks that the final report cites measurements that actually exist. The current project diagnoses incidents; remediation remains an operator action.
 
-Start with the [architecture tour](docs/architecture-tour.md), then use the
-[documentation index](docs/README.md) to reach the detailed specifications, measured results, and
-[MVP release hardening plan](docs/release-hardening-plan.md).
+## Choose a path
 
-The first release targets CPU saturation, cgroup OOM, and filesystem capacity exhaustion. DeepSeek Harness is the current runtime; the Python capability layer remains independent of it.
+| If you want to… | Start here |
+| --- | --- |
+| Understand the whole system in ten minutes | [Architecture tour](docs/architecture-tour.md) |
+| Run it on your laptop | [Local quick start](#local-quick-start) |
+| Investigate a disposable EC2 target | [AWS fault lab](#aws-fault-lab) |
+| Understand every probe and evidence type | [Capabilities and evidence](docs/capabilities-and-evidence.md) |
+| Review the Python architecture and source map | [Python design](docs/python-design.md) |
+| Review trust boundaries and failure handling | [Security and reliability](docs/security-and-reliability.md) |
+| See measured checks and known gaps | [Requirements verification](docs/requirements-verification.md) |
+| Browse every design document | [Documentation index](docs/README.md) |
+
+## The big picture
+
+The system separates reasoning from authority. DeepSeek Harness and the model run in an isolated agent container. They can request a fixed set of diagnostic capabilities from the broker, but they cannot reach the target, the model provider, or arbitrary network destinations directly.
 
 ```mermaid
 flowchart LR
-    CLI[Operator CLI] -->|admin token| Broker[Trusted broker]
-    Harness[DeepSeek Harness\nuntrusted agent container] -->|scoped MCP + model relay| Broker
-    Broker -->|typed probe token over local Docker or SSM| Target[Linux target]
-    Broker --> Store[(SQLite + hashed artifacts)]
-    Broker -->|optional fixed endpoint| OpenAI[OpenAI API]
-    Harness -. blocked .-> Target
-    Harness -. no public egress .-> OpenAI
+    Operator[Operator CLI] -->|start, follow up, cancel| Broker[Trusted broker]
+    Agent[DeepSeek Harness<br/>agent container] -->|scoped MCP tools| Broker
+    Broker -->|fixed model relay| Model[Model provider]
+    Broker -->|typed probes<br/>Docker or SSM route| Target[Linux target]
+    Broker --> Evidence[(SQLite metadata<br/>hashed artifacts)]
+    Agent -. no direct route .-> Target
+    Agent -. no provider credential .-> Model
 ```
 
-## Quick start: local development
+- **CLI:** presents an incident session, progress, diagnoses, and report paths.
+- **Agent runtime:** plans the investigation and chooses among approved tools.
+- **Broker:** owns authorization, target identity, deadlines, budgets, evidence persistence, report validation, and the model relay.
+- **Target probe service:** exposes six bounded Linux observations. There is no arbitrary command endpoint.
+- **Evidence store:** keeps structured metadata in SQLite and larger raw payloads as content-addressed artifacts.
 
-Requirements are Python 3.12, `uv`, Docker Desktop, and Docker Compose. Run commands from the
-repository root.
+The target may be a Docker container on the same development machine or an EC2 host reached through an AWS Systems Manager tunnel. The trust model and agent-facing tools are the same in both cases.
+
+## How an investigation works
+
+1. The operator describes a symptom through `oncall`.
+2. The broker creates a time-bounded investigation and gives the harness a scoped tool token.
+3. The model selects a typed probe such as CPU sampling, process ranking, memory inspection, filesystem inspection, or bounded journal reading.
+4. The broker checks scope and budget, then calls the target probe service.
+5. The probe service reads approved Linux interfaces such as `/proc`, cgroup v2 files, `statvfs`, and selected journal units.
+6. The broker records provenance, timing, quality, target identity, and a hash of the raw artifact.
+7. The model updates competing hypotheses and submits a report whose factual claims cite evidence IDs.
+8. The broker validates those citations and exports a Markdown report under `.local/reports/`.
+
+Interactive follow-ups create child investigations in the same incident lineage. Earlier evidence is clearly marked as historical, while claims about current conditions require a fresh observation. See [Architecture](docs/architecture.md) for the full local and EC2 sequence diagrams.
+
+## What it can investigate
+
+| Area | Observations | Typical question |
+| --- | --- | --- |
+| CPU | Host utilization, cgroup quota and throttling, ranked processes | Is pressure host-wide or limited to one cgroup, and which process dominates? |
+| Memory and OOM | Host memory, PSI, cgroup limits and events, bounded OOM journal evidence | Did this service experience a new cgroup OOM, or is the host under memory pressure? |
+| Filesystems | Capacity, inodes, mount identity, and selected service journal entries | Which mount is constrained, and did the write fail with `ENOSPC`? |
+| Service context | Bounded logs from an allowlist of units | Does the service log support or weaken the resource hypothesis? |
+| Controls | Healthy and unavailable targets | Does the system preserve uncertainty when no fault exists or the target cannot be observed? |
+
+Fault injection is a separate operator-only path. It uses leased workloads that expire automatically and can be stopped by an exact manifest. The model cannot invoke it.
+
+## Local quick start
+
+You need Python 3.12, [`uv`](https://docs.astral.sh/uv/), Docker Desktop, and Docker Compose. From the repository root:
 
 ```bash
-# Install the locked application, harness, and developer dependencies.
 uv sync --frozen --all-extras --dev
-
-# Create random local broker/target tokens without displaying them.
 .venv/bin/python scripts/init_lab.py
-
-# Build the trusted target/broker image and untrusted DSH image.
-docker compose build target agent
+docker compose build broker target agent
 docker compose up -d --wait target broker
-
-# Confirm the provider, target identity, protocol, and capabilities.
 .venv/bin/oncall doctor
 ```
 
-The default fixture provider needs no API key. It exercises the real DSH, MCP, sandbox, evidence, and
-report lifecycle with deterministic responses; it is a plumbing test, not a reasoning-quality result.
+The default fixture provider needs no API key. It runs the real harness, MCP, sandbox, evidence, and report lifecycle with deterministic responses, which makes it useful for checking the plumbing.
 
-For a live model, copy `.env.example` to the ignored `.env` and set:
+To use a live model, copy `.env.example` to the ignored `.env` file and set:
 
 ```dotenv
 ONCALL_PROVIDER=openai
@@ -58,144 +89,59 @@ ONCALL_MODEL=gpt-5.6-terra
 OPENAI_API_KEY=<your key>
 ```
 
-Only the broker receives the API key. For Terra, the broker removes the harness's incompatible
-temperature and uses `reasoning_effort="none"`, which is required for function tools through Chat
-Completions. Recreate the broker after changing `.env`:
-
-`RuntimeConfig` in `src/oncall/config.py` owns these environment-backed deployment settings and the
-shared runtime defaults. Enforced byte, concurrency, call, and deadline limits are code-owned defaults;
-they are not relaxed through environment variables.
+Only the broker receives the provider key. Recreate it after changing `.env`:
 
 ```bash
 docker compose up -d --no-deps --force-recreate --wait broker
+.venv/bin/oncall doctor
 ```
 
-The default interface is an incident session. Enter the first symptom, ask follow-up questions against
-the same evidence lineage, and use `/new` when the next message belongs to a different incident:
-
-```text
-$ .venv/bin/oncall
-Linux OnCall
-Describe the incident. Follow-up messages stay in this incident; use /new to start another.
-
-oncall> Investigate the service write failure and identify the constrained mount.
-→ Checking capacity on the root mount…
-✓ The root mount is 43.9% used with 3.8 GiB available.
-→ Checking capacity on the lab mount…
-✓ The lab mount is 99.6% used with 4.0 MiB available.
-...
-oncall> Is the capacity failure still present?
-oncall> /new
-oncall> Investigate current CPU pressure.
-oncall> /exit
-```
-
-Each message is a new immutable run within the incident lineage. A follow-up receives trusted reports,
-hypotheses, and evidence from earlier runs as historical context. It does not reuse hidden model
-reasoning, and any claim about the target's current condition still requires a fresh observation. The
-lineage is available for 24 hours and is limited to five generations; use `/new` after that bound.
-
-Natural questions about the agent or session are answered by the configured model. A direct answer is
-shown only when the turn used no tools and created no evidence, hypotheses, or report attempt; it does
-not advance the incident lineage. `/help` remains the deterministic local command reference.
-
-Use `/status` for the latest diagnosis and `/verbose` to toggle model request counts, timings, evidence
-IDs, byte counts, and other technical telemetry. `oncall --verbose` starts with that view enabled.
-
-`oncall investigate --symptom ...` remains the single-run interface for scripts and repeatable trials.
-`--symptom` is optional because the command has a CPU-oriented default, but explicit symptoms give
-memory, filesystem, and unavailable-target trials the correct starting context. Add `--verbose` when a
-trial needs the complete progress and evidence metadata in the terminal.
-
-### Create and investigate local scenarios
-
-Healthy control—inject nothing after a clean start:
+Start an interactive incident session:
 
 ```bash
-.venv/bin/oncall investigate --symptom \
-  "Check whether the target shows CPU, memory, or filesystem pressure. Do not invent a fault."
+.venv/bin/oncall
 ```
 
-Follow up on an existing result explicitly. This creates a child investigation; it does not silently
-reuse a hidden model conversation:
+Messages remain in the current incident until `/new`. Use `/help` for local commands, `/status` for the latest diagnosis, `/verbose` for technical telemetry, and `/exit` to leave. For a single scripted run:
 
 ```bash
-.venv/bin/oncall continue <run-id> --message \
-  "Explain why the earlier evidence ruled out host-wide CPU saturation."
-
-# Inspect or close one run by ID.
-.venv/bin/oncall status <run-id>
-.venv/bin/oncall close <run-id>
-```
-
-Prior evidence is exposed with its age and `historical` scope. Retrospective findings may cite it.
-Any finding about current conditions must cite fresh evidence collected by the child run. The first
-new observation verifies the target identity and records whether the boot ID is unchanged or rebooted.
-Continuation is available for 24 hours and is limited to five generations.
-
-CPU pressure—two bounded workers share the target container's one-core quota and stop automatically:
-
-```bash
-docker compose exec -d target \
-  python -m oncall.lab_fault cpu --seconds 120 --workers 2
 .venv/bin/oncall investigate --symptom \
   "Investigate the current CPU pressure, identify its scope and dominant processes, and cite evidence."
 ```
 
-Unavailable control—stop only the target, require an inconclusive result, then restore readiness:
+To create a bounded local CPU scenario first:
 
 ```bash
-docker compose stop target
+docker compose exec -d target \
+  python -m oncall.lab_fault cpu --seconds 120 --workers 2
+
 .venv/bin/oncall investigate --symptom \
-  "The target may be unavailable. Preserve uncertainty and do not report missing measurements as healthy."
-docker compose start target
-.venv/bin/oncall doctor
+  "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
 ```
 
-Local Docker shares a VM kernel, mounts the diagnostic lab volume read-only, and does not provide the
-dedicated systemd cgroup needed for safe OOM attribution. Use the disposable AWS lab for the memory and
-filesystem scenarios rather than weakening those safeguards:
+The default terminal view summarizes meaningful actions and observations in natural language. Add `--verbose` when you need timings, evidence IDs, byte counts, and model request counts. Complete JSON, evidence references, and Markdown reports are exported under `.local/reports/<investigation-id>/`.
 
-```bash
-# The inventory is produced by the AWS provisioning workflow.
-.venv/bin/oncall lab-start memory --inventory .local/aws/inventory.json --ttl-seconds 120
-.venv/bin/oncall investigate --symptom \
-  "Investigate the service memory failure; distinguish a new cgroup OOM from host memory pressure."
-.venv/bin/oncall lab-stop --inventory .local/aws/inventory.json
+Local Docker is the fastest development loop, but it shares Docker Desktop's VM kernel and does not provide the dedicated systemd cgroup used for safe OOM attribution. Use the disposable EC2 lab for the memory and filesystem demonstrations. The [evaluation and demo guide](docs/evaluation-and-demo.md) contains the full scenario catalog and expected outcomes.
 
-.venv/bin/oncall lab-start filesystem --inventory .local/aws/inventory.json --ttl-seconds 120
-.venv/bin/oncall investigate --symptom \
-  "Investigate the service write failure; identify the constrained mount and cite capacity evidence."
-.venv/bin/oncall lab-stop --inventory .local/aws/inventory.json
-```
+## AWS fault lab
 
-`lab-start` verifies a new OOM counter or controlled `errno 28` before returning. Its 30–120 second
-lease bounds the fault, and `lab-stop` removes only manifest-owned files/processes and verifies reset.
-See [AWS and Terraform](docs/aws-terraform.md) for provisioning and the SSM tunnel workflow.
+The AWS path provisions a small disposable EC2 target with Terraform, installs the current project wheel, attaches a dedicated lab volume, and enrolls a target credential. The broker remains local and reaches the target's loopback-only probe service through a fixed-port AWS Systems Manager tunnel. No inbound SSH or probe port is opened.
 
-The default terminal view shows meaningful probe actions, interpreted observations, the diagnosis,
-findings, limitations, next steps, and the Markdown report path. It omits transport and runtime noise.
-Complete JSON, evidence references, and Markdown remain under `.local/reports/<investigation-id>/`.
+You need configured AWS credentials, AWS CLI, the Session Manager plugin, Terraform, and the ignored `terraform.tfvars` files described in [AWS and Terraform](docs/aws-terraform.md).
 
-## Quick start: disposable AWS fault lab
-
-Requirements are configured AWS credentials, AWS CLI, the Session Manager plugin, Terraform, and the
-ignored `terraform.tfvars` files described in [AWS and Terraform](docs/aws-terraform.md). Run setup once
-from the repository root; it builds and uploads the current wheel, provisions the target, waits for
-readiness, and enrolls its scoped credential and CA:
+Provision and enroll the target:
 
 ```bash
 scripts/aws_lab.sh setup
 ```
 
-Keep the fixed-port SSM tunnel open in a dedicated terminal:
+Keep the tunnel open in a dedicated terminal:
 
 ```bash
 scripts/aws_lab.sh tunnel
 ```
 
-In another terminal, connect the broker to the AWS target and verify that readiness shows the new EC2
-instance ID rather than `docker-target`:
+In another terminal, point the broker at the tunnel and verify that `doctor` reports the EC2 instance rather than `docker-target`:
 
 ```bash
 docker compose -f compose.yaml -f compose.aws.yaml \
@@ -204,45 +150,60 @@ docker compose -f compose.yaml -f compose.aws.yaml \
 .venv/bin/oncall doctor
 ```
 
-Use the `lab-start`, `investigate`, and `lab-stop` commands above to exercise CPU, memory, or filesystem
-faults. When finished, reset any reachable fault, terminate target SSM sessions, remove enrollment, and
-destroy the lab and bootstrap resources:
+Create a leased fault, investigate it, and clean up the exact workload:
+
+```bash
+.venv/bin/oncall lab-start cpu \
+  --inventory .local/aws/inventory.json \
+  --ttl-seconds 120
+
+.venv/bin/oncall investigate --symptom \
+  "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
+
+.venv/bin/oncall lab-stop \
+  --inventory .local/aws/inventory.json
+```
+
+When finished, destroy the lab and its bootstrap resources:
 
 ```bash
 scripts/aws_lab.sh teardown
 ```
 
-## Resource teardown
+The wrapper resets reachable faults, terminates project SSM sessions, removes local enrollment, destroys the EC2 lab, and then destroys the release bootstrap. Stopping the instance is insufficient because EBS and public IPv4 charges may continue.
 
-Stop local containers while retaining named volumes:
+## Design principles
 
-```bash
-.venv/bin/oncall cancel  # safe no-op if the latest run already finished
-docker compose down --remove-orphans
+- **Evidence before interpretation.** Reports cite immutable observations rather than relying on a model transcript.
+- **Authority outside the model.** Trusted code enforces scope, deadlines, concurrency, call counts, output sizes, and target identity.
+- **Typed capabilities.** Every target operation has validated parameters and a bounded result shape.
+- **Explicit uncertainty.** Unavailable probes, partial output, stale evidence, and contradictory measurements remain visible.
+- **Replaceable boundaries.** Domain models do not depend on AWS, MCP, or the harness SDK; protocols and dependency injection isolate I/O.
+- **Reproducible failure scenarios.** Operator-owned leases make synthetic faults bounded, attributable, and reversible.
+
+The architectural decisions and their tradeoffs are recorded in [Decision records](docs/decisions.md).
+
+## Project map
+
+```text
+src/oncall/                 Python application and domain packages
+tests/                      Parser, policy, lifecycle, and integration tests
+scripts/                    Local initialization, evaluation, and AWS lifecycle tools
+infra/terraform/            Bootstrap and disposable lab infrastructure
+docker/                     Trusted and untrusted container definitions
+docs/                       Architecture, operations, evaluation, and decisions
+.local/                     Ignored reports, evidence exports, and AWS inventory
 ```
 
-Remove all disposable local containers, networks, and named evidence/lab volumes:
+For code-level orientation, [Python design](docs/python-design.md) maps responsibilities to packages, classes, and protocols. [Architecture tour](docs/architecture-tour.md) starts at the operator command and follows one request through every component.
 
-```bash
-docker compose down --volumes --remove-orphans
-```
+## Current scope and evidence
 
-Host exports under `.local/reports/`, `.local/evaluation/`, and `.local/aws/` are not Docker volumes.
-Review them first, then remove only the data you no longer need. `.local/` and `.env` are ignored by Git.
+The core Python checks currently cover 72 tests plus Ruff, formatting, strict MyPy, package build, Compose validation, and Terraform validation. Retained AWS substrate trials cover three runs each of CPU, OOM, filesystem, healthy, and unavailable scenarios. Live model evidence includes a human-reviewed Terra CPU diagnosis and a retained semantic failure from a smaller model.
 
-For AWS, use the lifecycle wrapper described above. It always destroys the lab before its state and
-release bootstrap:
+These results demonstrate the end-to-end mechanism and the fault substrate. A complete repeated same-model report-quality matrix is still open. The project also remains a single-operator, single-target MVP with local evidence storage and no automated remediation. [Requirements verification](docs/requirements-verification.md) separates current checks, retained measurements, and remaining gaps so that these claims stay auditable.
 
-```bash
-scripts/aws_lab.sh teardown
-```
-
-Terminate any remaining SSM tunnel process and verify there are no project EC2 instances, EBS volumes,
-VPCs, security groups, SSM sessions/documents/parameters, IAM roles/profiles, or S3 buckets. Stopping an
-instance is not teardown because EBS and public IPv4 charges may remain. The exercised Day 4 run was
-destroyed and direct active-resource inventories were empty.
-
-## Verify changes
+## Development checks
 
 ```bash
 .venv/bin/ruff check src tests scripts
@@ -256,5 +217,25 @@ terraform -chdir=infra/terraform/bootstrap validate
 terraform -chdir=infra/terraform/environments/lab validate
 ```
 
-Measured requirement-by-requirement results are recorded in
-[Requirements verification](docs/requirements-verification.md).
+## Cleanup
+
+Stop local containers while retaining named volumes:
+
+```bash
+.venv/bin/oncall cancel
+docker compose down --remove-orphans
+```
+
+Remove local containers, networks, and named evidence and lab volumes:
+
+```bash
+docker compose down --volumes --remove-orphans
+```
+
+Host exports under `.local/reports/`, `.local/evaluation/`, and `.local/aws/` are separate from Docker volumes. Review them before removing data you still need. Both `.local/` and `.env` are ignored by Git.
+
+Destroy AWS resources with the lifecycle wrapper:
+
+```bash
+scripts/aws_lab.sh teardown
+```
