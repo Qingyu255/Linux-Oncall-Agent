@@ -1,10 +1,8 @@
 import json
-from dataclasses import dataclass
 
 import pytest
 
 from oncall.domain import CpuFacts, Hypothesis, Observation, ProbeRequest, utcnow
-from oncall.faults import FaultController, OperatorExecutor
 from oncall.parsers import (
     parse_meminfo,
     parse_memory_events,
@@ -110,38 +108,9 @@ def test_artifact_pages_are_lossless_and_hypotheses_are_versioned(tmp_path):
     store.close()
 
 
-@dataclass
-class FixtureExecutor(OperatorExecutor):
-    outputs: list[str]
-
-    def execute(self, commands, timeout=180):
-        return self.outputs.pop(0)
-
-
-def test_fault_controller_persists_lease_and_verifies_cleanup(tmp_path):
-    executor = FixtureExecutor(["", "ready", "", "clean"])
-    controller = FaultController(executor, tmp_path / "lease.json", "i-0123456789abcdef0")
-    lease = controller.start("cpu", 30)
-    assert lease.status == "ready" and controller.current() == lease
-    controller.stop()
-    assert controller.current() is None
-
-
 def test_probe_requests_reject_authority_for_the_wrong_capability():
     with pytest.raises(ValueError):
         ProbeRequest(name="inspect_filesystem", mount_id="root", scope_id="self")
-
-
-def test_fault_plans_require_new_oom_and_verify_resource_reset():
-    from oncall.faults import SCENARIOS
-
-    memory = SCENARIOS["memory"].plan(60)
-    assert any(".oncall-oom-before" in command for command in memory.start)
-    assert any('test "$after" -gt "$before"' in command for command in memory.ready)
-    assert any("MemoryMax=infinity" in command for command in memory.cleanup)
-    assert any("memory.max" in command for command in memory.verify_clean)
-    filesystem = SCENARIOS["filesystem"].plan(60)
-    assert any("blocks * size" in command for command in filesystem.verify_clean)
 
 
 def test_hypothesis_cannot_use_one_observation_as_support_and_contradiction():

@@ -1,4 +1,4 @@
-from oncall.fixture_provider import fixture_message
+from oncall.lab.fixture_provider import fixture_message
 
 
 def request_body(*, tool_results=()):

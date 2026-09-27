@@ -1,10 +1,10 @@
-"""Package one investigation into a reproducible Day 4 evaluation bundle."""
+"""Package one investigation into a reproducible evaluation bundle."""
 
 import argparse
 import json
 from pathlib import Path
 
-from oncall.evaluation import (
+from oncall.lab.evaluation import (
     EvaluationBundleWriter,
     HumanReview,
     ScenarioTruth,
@@ -15,7 +15,7 @@ from oncall.evaluation import (
     source_revision,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:

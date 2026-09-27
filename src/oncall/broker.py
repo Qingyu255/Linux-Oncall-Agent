@@ -14,7 +14,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 
 from oncall.config import DEFAULT_RUNTIME_CONFIG, RuntimeConfig
 from oncall.domain import Hypothesis, PolicyError, ProbeRequest, Report
-from oncall.fixture_provider import fixture_message, sse_chunks
 from oncall.http_boundary import Boundary, secret_file
 from oncall.service import InvestigationService
 from oncall.storage import EvidenceStore
@@ -298,6 +297,8 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
             raise HTTPException(HTTPStatus.BAD_REQUEST, "Model is not configured")
         store.event(service.run_id, "model_request", {"mode": mode, "model": configured_model})
         if mode == "fixture":
+            from oncall.lab.fixture_provider import fixture_message, sse_chunks
+
             message = fixture_message(body)
             return StreamingResponse(sse_chunks(body, message), media_type="text/event-stream")
         key = settings.openai_api_key

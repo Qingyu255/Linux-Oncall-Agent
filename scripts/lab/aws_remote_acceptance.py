@@ -1,4 +1,4 @@
-"""Exercise the remote Day 2 boundary without displaying credentials."""
+"""Exercise the remote target boundary without displaying credentials."""
 
 import argparse
 import json
@@ -11,7 +11,7 @@ import httpx
 
 from oncall.aws_ssm import AwsCli, SsmTunnel
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".local/aws"
 
 
@@ -133,7 +133,7 @@ def main() -> None:
             [
                 "systemctl stop oncall-cpu-fault.service >/dev/null 2>&1 || true",
                 "systemd-run --unit=oncall-cpu-fault --property=RuntimeMaxSec=35 "
-                "/opt/oncall/bin/python -m oncall.lab_fault --seconds 30 --workers 2",
+                "/opt/oncall/bin/python -m oncall.lab.workload cpu --seconds 30 --workers 2",
             ],
         )
         investigation = run(

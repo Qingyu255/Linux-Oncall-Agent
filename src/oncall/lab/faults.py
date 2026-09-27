@@ -65,7 +65,7 @@ class CpuScenario(FaultScenario):
                 "set -e",
                 *self.common_cleanup(),
                 f"systemd-run --unit=oncall-lab-workload --property=RuntimeMaxSec={ttl_seconds} "
-                "/opt/oncall/bin/python -m oncall.lab_fault cpu --seconds "
+                "/opt/oncall/bin/python -m oncall.lab.workload cpu --seconds "
                 f"{ttl_seconds - 5} --workers 2",
             ),
             ready=(
@@ -104,7 +104,7 @@ class MemoryScenario(FaultScenario):
                 "systemctl set-property oncall-lab.slice MemoryMax=48M",
                 f"systemd-run --unit=oncall-lab-workload --slice=oncall-lab.slice "
                 f"--property=RuntimeMaxSec={ttl_seconds} /opt/oncall/bin/python "
-                f"-m oncall.lab_fault memory --seconds {ttl_seconds - 5} --mebibytes 128",
+                f"-m oncall.lab.workload memory --seconds {ttl_seconds - 5} --mebibytes 128",
             ),
             ready=(
                 "set -e",
@@ -139,7 +139,7 @@ class FilesystemScenario(FaultScenario):
                 *self.common_cleanup(),
                 f"systemd-run --unit=oncall-lab-workload --uid=oncall "
                 f"--property=RuntimeMaxSec={ttl_seconds} /opt/oncall/bin/python "
-                f"-m oncall.lab_fault filesystem --seconds {ttl_seconds - 5} "
+                f"-m oncall.lab.workload filesystem --seconds {ttl_seconds - 5} "
                 "--reserve-mib 4 --maximum-mib 1024",
             ),
             ready=(

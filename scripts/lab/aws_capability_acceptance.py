@@ -1,4 +1,4 @@
-"""Exercise Day 3 memory/OOM, filesystem, journal, and cleanup behavior on AWS."""
+"""Exercise memory/OOM, filesystem, journal, and cleanup behavior on AWS."""
 
 import argparse
 import concurrent.futures
@@ -10,9 +10,9 @@ from pathlib import Path
 import httpx
 
 from oncall.aws_ssm import AwsCli, SsmTunnel
-from oncall.faults import SCENARIOS, FaultController, SsmOperatorExecutor
+from oncall.lab.faults import SCENARIOS, FaultController, SsmOperatorExecutor
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".local/aws"
 
 
@@ -116,7 +116,7 @@ def main() -> None:
                             "set -e",
                             "systemd-run --unit=oncall-lab-workload --slice=oncall-lab.slice "
                             "--property=RuntimeMaxSec=110 /opt/oncall/bin/python "
-                            "-m oncall.lab_fault memory --seconds 100 --mebibytes 128",
+                            "-m oncall.lab.workload memory --seconds 100 --mebibytes 128",
                         ),
                     )
                     cgroup = sample.result(timeout=15)

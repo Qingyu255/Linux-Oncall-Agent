@@ -1,4 +1,4 @@
-"""Run repeated Day 4 substrate trials without claiming model diagnostic quality."""
+"""Run repeated substrate trials without claiming model diagnostic quality."""
 
 import argparse
 import json
@@ -12,10 +12,10 @@ from typing import Any
 import httpx
 
 from oncall.aws_ssm import AwsCli, SsmTunnel
-from oncall.evaluation import source_revision
-from oncall.faults import FaultController, SsmOperatorExecutor
+from oncall.lab.evaluation import source_revision
+from oncall.lab.faults import FaultController, SsmOperatorExecutor
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".local/aws"
 
 
@@ -31,7 +31,7 @@ def main() -> None:
     args = parser.parse_args()
     inventory = json.loads(args.inventory.read_text())
     if inventory.get("disposable") is not True:
-        raise RuntimeError("Day 4 trials require an explicitly disposable target")
+        raise RuntimeError("Substrate trials require an explicitly disposable target")
     instance, region = inventory["instance_id"], inventory["region"]
     aws = AwsCli(region)
     aws.wait_managed_node(instance)

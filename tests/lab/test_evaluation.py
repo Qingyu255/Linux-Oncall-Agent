@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from oncall.domain import utcnow
-from oncall.evaluation import HumanReview, ScenarioTruth, TrialManifest, TrialScorer
+from oncall.lab.evaluation import HumanReview, ScenarioTruth, TrialManifest, TrialScorer
 
 
 def test_evaluator_separates_deterministic_gates_from_model_quality():

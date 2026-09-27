@@ -18,8 +18,8 @@ from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
-from oncall.faults import SCENARIOS, FaultController, SsmOperatorExecutor
 from oncall.harness_progress import PROGRESS_PROTOCOL, progress_message
+from oncall.lab.faults import SCENARIOS, FaultController, SsmOperatorExecutor
 from oncall.operator_view import operator_progress_message
 from oncall.progress_projection import bounded_assistant_response
 
