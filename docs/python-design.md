@@ -8,18 +8,24 @@ Current layout:
 
 ```text
 src/oncall/
-  config.py          # immutable runtime defaults and environment parsing
-  domain.py          # frozen schemas, evidence, reports, policy errors
-  parsers.py         # pure Linux-format parsing functions
-  probes.py          # bounded /proc and cgroup observations
-  service.py         # lifecycle, budgets, cancellation, report validation
-  storage.py         # SQLite repository and atomic hashed artifacts
-  transport.py       # fixed-destination target client
-  target.py          # authenticated typed target API
-  broker.py          # composition root, MCP tools and fixed model relay
-  harness_runner.py  # DSH SDK entry point for the sandbox container
-  http_boundary.py   # authentication and request-size boundary
-  cli.py             # trusted operator interface and report rendering
+  config.py             # immutable runtime defaults and environment parsing
+  domain.py             # frozen schemas shared across runtime boundaries
+  http_boundary.py      # shared authentication and request-size boundary
+  cli.py                # trusted operator interface and report rendering
+  broker/
+    app.py              # composition root, MCP tools and fixed model relay
+    service.py          # lifecycle, budgets, cancellation, report validation
+    storage.py          # SQLite repository and atomic hashed artifacts
+    transport.py        # fixed-destination target client
+  target/
+    app.py              # authenticated typed target API
+    probes.py           # bounded /proc, cgroup and journal observations
+    parsers.py          # pure Linux-format parsing functions
+  harness/
+    runner.py           # DSH SDK entry point for the sandbox container
+    progress.py         # SDK-event to safe-progress adapter and verbose renderer
+    projection.py       # bounded parsing of untrusted harness event fields
+    operator_view.py    # terminal-facing projection of safe progress events
   lab/               # synthetic validation support, outside diagnostic logic
     faults.py        # operator-only fault strategies, leases and cleanup facade
     workload.py      # bounded target-side CPU, memory and filesystem workloads
@@ -35,21 +41,27 @@ infra/terraform/      # disposable AWS target and bootstrap roots
 docs/
 ```
 
-The `oncall.lab` package may depend on diagnostic contracts such as `oncall.domain` and AWS transport.
-Diagnostic domain, probe, service, storage, and target modules do not import `oncall.lab`. The trusted
-CLI composes optional fault commands, and the broker imports only the deterministic fixture adapter
-used by explicit fixture mode. A package-boundary test permits those two composition roots while
-preventing diagnostic modules from depending on lab implementation. This keeps synthetic scenario
-truth and scoring out of the evidence-collection path.
+The three deployable runtimes have explicit package boundaries. `oncall.broker` owns authority,
+evidence admission and persistence; `oncall.target` owns Linux access and cannot import broker or
+harness implementation; `oncall.harness` owns the optional DSH SDK and cannot import broker or target
+implementation. Their common wire values live in `oncall.domain`, which has no framework, network or
+operating-system effects.
+
+The `oncall.lab` package may depend on stable contracts such as `oncall.domain` and AWS transport.
+Diagnostic packages do not import `oncall.lab`. The trusted CLI composes optional fault commands, and
+the broker composition root imports only the deterministic fixture adapter used by explicit fixture
+mode. Package-boundary tests permit those composition roots while preventing the target and harness
+packages from reaching across runtime boundaries. This keeps synthetic scenario truth and scoring out
+of the evidence-collection path.
 
 ```mermaid
 flowchart LR
-    CLI[CLI and MCP adapters] --> App[Application services]
-    App --> Domain[Domain models and rules]
-    App --> Ports[Protocols]
-    IO[HTTP, SQLite, files and harness adapters] -. implement .-> Ports
-    Root[Composition root] --> App
-    Root --> IO
+    CLI[Operator CLI] --> Broker[oncall.broker]
+    Harness[oncall.harness] -->|MCP and model relay| Broker
+    Broker -->|ProbeRequest / Observation| Target[oncall.target]
+    Broker --> Domain[oncall.domain]
+    Harness --> Domain
+    Target --> Domain
 ```
 
 The domain imports neither SDKs nor subprocess/network libraries. Parsers accept captured text/bytes and return typed values. A class is justified by owned state or an interchangeable behavior; a parser does not need an abstract factory.
@@ -64,7 +76,7 @@ The domain imports neither SDKs nor subprocess/network libraries. Parsers accept
 | `PolicyEngine` | Pure decision over caller, capability metadata and request | Executing probes |
 | `ProbeRegistry` | Explicit mapping of known names to collectors and schemas | Runtime loading of model-provided code |
 | `LinuxProbe` ABC | Shared identity/timing/quality/output Template Method | Persistence and interpretation |
-| Probe subclasses | CPU, process, memory, cgroup, filesystem and journal strategies | Cross-capability authority |
+| Probe subclasses | CPU, process ranking/identity, memory, cgroup, filesystem and journal strategies | Cross-capability authority |
 | `BoundedCommandRunner` | Fixed executable/argv, pipe limits, deadlines, process cleanup | Accepting arbitrary model commands |
 | `EvidenceRepository` | Immutable observations and transactional state updates | Model prompts |
 | `ArtifactStore` | Atomic writes, digest, size limits, scoped retrieval | Arbitrary filesystem paths from clients |

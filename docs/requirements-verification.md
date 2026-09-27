@@ -20,14 +20,14 @@ flowchart LR
     Matrix --> Teardown[Docker and AWS inventories empty]
 ```
 
-## Current repository checks — 2026-09-27
+## Current repository checks — 2026-09-28
 
 | Check | Command | Result |
 |---|---|---|
 | Lint | `.venv/bin/ruff check src tests scripts` | `All checks passed!` |
 | Formatting | `.venv/bin/ruff format --check src tests scripts` | Pass |
 | Strict typing | `.venv/bin/mypy` | Pass over the complete runtime package |
-| Automated tests | `.venv/bin/pytest -q` | `79 passed` |
+| Automated tests | `.venv/bin/pytest -q` | `86 passed` |
 | Package | `.venv/bin/python -m build --no-isolation` | sdist and wheel built successfully |
 | Compose | `docker compose --profile agent config --quiet` | Pass |
 | Container smoke | fixture-mode `oncall doctor` and `oncall investigate` | Readiness and accepted report passed through rebuilt target, broker, and agent images |
@@ -36,7 +36,8 @@ The suite covers malformed schemas, policy and artifact ownership, UTF-8 paging,
 citation validation, storage recovery, deadlines, cancellation, concurrent budgets, target concurrency,
 in-flight idempotency, disconnect shielding, credentials, byte integrity, fault lifecycle, evaluator
 controls, provider adaptation, runtime configuration, interactive sessions, terminal redaction,
-isolated skill discovery, safe skill progress, and evidence-free unavailable conclusions.
+isolated skill discovery, safe skill progress, evidence-free unavailable conclusions, and bounded
+process-identity attribution with PID-reuse and redaction checks.
 
 ## Retained platform checks — 2026-09-24
 

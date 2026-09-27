@@ -274,7 +274,7 @@ provider telemetry, and resumable investigation state. Scale API and workers ind
 ### Stage 3: fleet connectivity
 
 Replace per-target SSM tunnels with outbound mTLS target sessions, certificate enrollment and
-rotation, trusted inventory, regional routing, and fleet health. Preserve the same six core probe
+rotation, trusted inventory, regional routing, and fleet health. Preserve the same seven core probe
 contracts before adding more capabilities.
 
 ### Stage 4: multi-tenant operation

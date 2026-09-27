@@ -9,6 +9,7 @@ Limits below are proposed defaults and hard maxima must be configured on the tar
 | `sample_cpu_pressure` | 1–5 seconds; default 2 | `/proc/stat` deltas, load and probe-process cgroup CPU use/throttling |
 | `inspect_memory_pressure` | Fixed procfs sources | MemAvailable, swap totals, bounded vmstat counters, optional memory PSI |
 | `rank_processes` | CPU/RSS enum, top 1–20, bounded sample and scan | PID/start-time identity, executable name, sampled CPU/RSS |
+| `inspect_process_identity` | Exact PID/start-time pair admitted by current ranking evidence | Sanitized bounded argv, executable, UID, parent, cgroup path, and inferred systemd unit; no environment, memory, or open files |
 | `inspect_cgroup_memory` | Opaque `self` or `lab` scope | memory current/max/swap and before/after events; no arbitrary path |
 | `inspect_filesystem` | Approved `root` or `lab` mount | Total/available blocks and inodes; read-only flag scoped to the probe namespace |
 | `query_service_journal` | Approved unit; max 15-minute window, 500 lines, 256 KiB | Journal artifact and parsed events; no global unbounded log query |
@@ -28,7 +29,7 @@ Kernel event queries are optional when permissions permit; cgroup counters and c
 - PSI describes time tasks stall for resources, not a root cause by itself. Missing PSI is unsupported, not zero. [Kernel PSI reference](https://docs.kernel.org/accounting/psi.html).
 - Exit status 137 alone does not establish OOM. A segmentation fault does not establish stack overflow. Cache/TLB diagnoses require suitable counters and privileges.
 - Use both block and inode availability; distinguish the lab mount from root. Filesystem capacity alone does not prove a specific application failed to write.
-- A PID can exit or be reused during collection. Pair it with boot ID/start ticks, and return stale identity or partial data instead of attaching observations to a different process.
+- A PID can exit or be reused during collection. Pair it with boot ID/start ticks, and return stale identity or partial data instead of attaching observations to a different process. Process identity inspection is authorized only for a PID/start-time pair in current ranking evidence and rechecks that pair before and after reading bounded metadata.
 
 ## Protocol and errors
 

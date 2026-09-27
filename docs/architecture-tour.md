@@ -30,10 +30,10 @@ The responsibilities are deliberately separate:
 | Component | Owns | Must not own | Primary code |
 |---|---|---|---|
 | Operator CLI | Run lifecycle, Docker launch, terminal presentation, report export | Linux interpretation or model credentials | [`cli.py`](../src/oncall/cli.py) |
-| Harness agent | Diagnostic choices, hypotheses, cited report proposal | Target shell authority, AWS credentials, provider key | [`harness_runner.py`](../src/oncall/harness_runner.py), [`oncall.patch.yml`](../harness/oncall.patch.yml) |
-| Trusted broker | Policy, budgets, MCP tools, model relay, evidence admission | Fault injection | [`broker.py`](../src/oncall/broker.py), [`service.py`](../src/oncall/service.py) |
-| Target service | Fixed Linux observations with local deadlines and limits | Model runtime or generic shell API | [`target.py`](../src/oncall/target.py), [`probes.py`](../src/oncall/probes.py) |
-| Evidence store | Immutable artifacts, typed metadata, events, hypotheses, reports | Diagnostic decisions | [`storage.py`](../src/oncall/storage.py) |
+| Harness agent | Diagnostic choices, hypotheses, cited report proposal | Target shell authority, AWS credentials, provider key | [`harness_runner.py`](../src/oncall/harness/runner.py), [`oncall.patch.yml`](../harness/oncall.patch.yml) |
+| Trusted broker | Policy, budgets, MCP tools, model relay, evidence admission | Fault injection | [`broker.py`](../src/oncall/broker/app.py), [`service.py`](../src/oncall/broker/service.py) |
+| Target service | Fixed Linux observations with local deadlines and limits | Model runtime or generic shell API | [`target.py`](../src/oncall/target/app.py), [`probes.py`](../src/oncall/target/probes.py) |
+| Evidence store | Immutable artifacts, typed metadata, events, hypotheses, reports | Diagnostic decisions | [`storage.py`](../src/oncall/broker/storage.py) |
 
 The product requirements behind these boundaries are in [Requirements](requirements.md). The design
 decisions and rejected alternatives are in [Architecture decisions](decisions.md).
@@ -327,8 +327,8 @@ sequenceDiagram
 
 The CLI orchestration is `investigate()` and `run_harness()` in
 [`cli.py`](../src/oncall/cli.py). The broker composition root is `create_app()` in
-[`broker.py`](../src/oncall/broker.py). The application lifecycle and report validation live in
-`InvestigationService` in [`service.py`](../src/oncall/service.py).
+[`broker.py`](../src/oncall/broker/app.py). The application lifecycle and report validation live in
+`InvestigationService` in [`service.py`](../src/oncall/broker/service.py).
 
 ## Level 4: authority and trust boundaries
 
@@ -363,15 +363,15 @@ The important enforcement points are:
    request-body limits before FastAPI or MCP receives a request.
 2. [`domain.py`](../src/oncall/domain.py) rejects unknown fields, invalid probe combinations,
    non-finite values, inconsistent observation quality, and malformed evidence references.
-3. [`service.py`](../src/oncall/service.py) enforces one active run, a 180-second deadline, at most 20
+3. [`service.py`](../src/oncall/broker/service.py) enforces one active run, a 180-second deadline, at most 20
    probe calls, two concurrent probes, and a 10 MiB investigation capture budget.
-4. [`target.py`](../src/oncall/target.py) requires an idempotency key, bounds in-flight calls, gives
+4. [`target.py`](../src/oncall/target/app.py) requires an idempotency key, bounds in-flight calls, gives
    collectors seven seconds, and caches only matching retries.
-5. [`transport.py`](../src/oncall/transport.py) fixes the target base URL at construction and caps both
+5. [`transport.py`](../src/oncall/broker/transport.py) fixes the target base URL at construction and caps both
    compressed and decoded responses.
-6. [`storage.py`](../src/oncall/storage.py) writes and fsyncs an artifact before committing evidence
+6. [`storage.py`](../src/oncall/broker/storage.py) writes and fsyncs an artifact before committing evidence
    metadata with its SHA-256 digest.
-7. [`broker.py`](../src/oncall/broker.py) exposes only registered MCP tools and relays only allowlisted
+7. [`broker.py`](../src/oncall/broker/app.py) exposes only registered MCP tools and relays only allowlisted
    model fields to one fixed OpenAI endpoint.
 
 Credentials flow in one direction:
@@ -395,13 +395,13 @@ MCP, AWS, Docker, the harness SDK, HTTPX, SQLite, or Linux filesystem APIs.
 ```mermaid
 flowchart TB
     CLI[cli.py] --> Admin[Broker admin HTTP]
-    Runner[harness_runner.py] --> DSH[DeepSeek Harness SDK]
-    Progress[harness_progress.py] --> CLI
+    Runner[oncall.harness.runner] --> DSH[DeepSeek Harness SDK]
+    Progress[oncall.harness.progress] --> CLI
     Runner --> Progress
 
-    Broker[broker.py composition root] --> Service[service.py application policy]
-    Broker --> Transport[transport.py target adapter]
-    Broker --> Store[storage.py persistence adapter]
+    Broker[oncall.broker.app] --> Service[oncall.broker.service]
+    Broker --> Transport[oncall.broker.transport]
+    Broker --> Store[oncall.broker.storage]
     Broker --> MCP[MCP SDK]
     Service --> Domain[domain.py contracts]
     Service --> TargetPort[TargetClient Protocol]
@@ -409,9 +409,9 @@ flowchart TB
     Transport --> Domain
     Store --> Domain
 
-    Target[target.py HTTP adapter] --> Registry[probes.py ProbeRegistry]
+    Target[oncall.target.app] --> Registry[oncall.target.probes]
     Registry --> Probes[LinuxProbe implementations]
-    Probes --> Parsers[parsers.py pure parsing]
+    Probes --> Parsers[oncall.target.parsers]
     Probes --> Domain
 ```
 
@@ -419,15 +419,15 @@ The design uses patterns where they carry a concrete boundary:
 
 | Pattern | Where | Why it exists |
 |---|---|---|
-| Dependency inversion | `TargetClient` protocol in [`service.py`](../src/oncall/service.py) | Application policy can be tested without HTTP, Docker, or AWS |
-| Template method | `LinuxProbe.collect()` plus subclass `_collect()` in [`probes.py`](../src/oncall/probes.py) | Provenance, timing, quality, and error conversion remain consistent across collectors |
-| Registry | `ProbeRegistry` in [`probes.py`](../src/oncall/probes.py) | A closed capability name selects a fixed implementation without model-provided commands |
+| Dependency inversion | `TargetClient` protocol in [`service.py`](../src/oncall/broker/service.py) | Application policy can be tested without HTTP, Docker, or AWS |
+| Template method | `LinuxProbe.collect()` plus subclass `_collect()` in [`probes.py`](../src/oncall/target/probes.py) | Provenance, timing, quality, and error conversion remain consistent across collectors |
+| Registry | `ProbeRegistry` in [`probes.py`](../src/oncall/target/probes.py) | A closed capability name selects a fixed implementation without model-provided commands |
 | Strategy | `FaultScenario` and CPU/memory/filesystem strategies in [`lab/faults.py`](../src/oncall/lab/faults.py) | Each fault has distinct setup, readiness, cleanup, and cleanup verification |
 | Adapter | `HttpTargetClient`, `HarnessProgressAdapter`, and `SsmTunnel` | HTTP, DSH notifications, and AWS sessions stay outside the domain |
 | Facade | `InvestigationService` and `FaultController` | Callers use a small lifecycle API while enforcement remains centralized |
 
 Classes own state or interchangeable behavior. Stateless Linux decoding remains in pure functions in
-[`parsers.py`](../src/oncall/parsers.py). [Python design](python-design.md) defines the detailed coding,
+[`parsers.py`](../src/oncall/target/parsers.py). [Python design](python-design.md) defines the detailed coding,
 concurrency, persistence, and harness integration rules.
 
 ## Level 6: contracts and data flow
@@ -521,18 +521,19 @@ The schemas, Linux interpretation rules, and size limits are defined in
 ## Level 7: target collectors
 
 The target exposes `/health` and `/v1/probe`; it has no shell endpoint. `ProbeRegistry` dispatches one
-of six names to a fixed collector.
+of seven names to a fixed collector.
 
 | Capability | Implementation | Primary inputs | What it distinguishes |
 |---|---|---|---|
-| `sample_cpu_pressure` | `CpuPressureProbe` in [`probes.py`](../src/oncall/probes.py) | `/proc/stat`, load average, cgroup CPU files | Shared-kernel host activity from probe-cgroup quota and throttling |
-| `rank_processes` | `ProcessRankingProbe` in [`probes.py`](../src/oncall/probes.py) | Bounded `/proc/<pid>` snapshots | Interval CPU consumers with PID reuse protection through start ticks |
-| `inspect_memory_pressure` | `MemoryPressureProbe` in [`probes.py`](../src/oncall/probes.py) | meminfo, vmstat, optional PSI | Host availability, swap, faults, pressure, and optional kernel OOM count |
-| `inspect_cgroup_memory` | `CgroupMemoryProbe` in [`probes.py`](../src/oncall/probes.py) | Opaque `self` or `lab` cgroup mapping | Current/limit/swap plus before-and-after OOM event deltas |
-| `inspect_filesystem` | `FilesystemProbe` in [`probes.py`](../src/oncall/probes.py) | Opaque `root` or `lab` mount mapping | Blocks, inodes, filesystem type, and read-only probe view |
-| `query_service_journal` | `JournalProbe` in [`probes.py`](../src/oncall/probes.py) | Two allowlisted systemd units | Bounded, boot-scoped, sanitized service events |
+| `sample_cpu_pressure` | `CpuPressureProbe` in [`probes.py`](../src/oncall/target/probes.py) | `/proc/stat`, load average, cgroup CPU files | Shared-kernel host activity from probe-cgroup quota and throttling |
+| `rank_processes` | `ProcessRankingProbe` in [`probes.py`](../src/oncall/target/probes.py) | Bounded `/proc/<pid>` snapshots | Interval CPU consumers with PID reuse protection through start ticks |
+| `inspect_process_identity` | `ProcessIdentityProbe` in [`probes.py`](../src/oncall/target/probes.py) | One ranked PID/start-time pair; bounded `/proc/<pid>` metadata | Executable, sanitized argv, parent, UID, cgroup, and systemd workload ownership |
+| `inspect_memory_pressure` | `MemoryPressureProbe` in [`probes.py`](../src/oncall/target/probes.py) | meminfo, vmstat, optional PSI | Host availability, swap, faults, pressure, and optional kernel OOM count |
+| `inspect_cgroup_memory` | `CgroupMemoryProbe` in [`probes.py`](../src/oncall/target/probes.py) | Opaque `self` or `lab` cgroup mapping | Current/limit/swap plus before-and-after OOM event deltas |
+| `inspect_filesystem` | `FilesystemProbe` in [`probes.py`](../src/oncall/target/probes.py) | Opaque `root` or `lab` mount mapping | Blocks, inodes, filesystem type, and read-only probe view |
+| `query_service_journal` | `JournalProbe` in [`probes.py`](../src/oncall/target/probes.py) | Two allowlisted systemd units | Bounded, boot-scoped, sanitized service events |
 
-[`parsers.py`](../src/oncall/parsers.py) converts kernel text formats into typed values.
+[`parsers.py`](../src/oncall/target/parsers.py) converts kernel text formats into typed values.
 [`tests/test_parsers.py`](../tests/test_parsers.py) covers parsing edge cases;
 [`tests/test_observation_pipeline.py`](../tests/test_observation_pipeline.py) covers memory, filesystem, journal, and artifact behavior;
 [`tests/test_target.py`](../tests/test_target.py) covers the HTTP/idempotency boundary.
@@ -547,7 +548,7 @@ The broker is one process with three surfaces:
 | MCP tools | Harness | Agent token | Probes, artifact pages, hypotheses, and report submission |
 | `/v1/chat/completions` | Harness provider plugin | Agent token | Fixed-destination, bounded model relay |
 
-`create_app()` in [`broker.py`](../src/oncall/broker.py) wires these surfaces to one
+`create_app()` in [`broker.py`](../src/oncall/broker/app.py) wires these surfaces to one
 `InvestigationService`, one `EvidenceStore`, and one fixed `HttpTargetClient`. The relay removes all
 request fields outside its allowlist, caps model output, rejects a model other than the configured
 one, limits calls, and never returns upstream error bodies. Terra compatibility is applied in
@@ -555,7 +556,7 @@ one, limits calls, and never returns upstream error bodies. Terra compatibility 
 exercise the real harness, MCP, evidence, and report path deterministically without claiming model
 reasoning quality.
 
-The isolated runner in [`harness_runner.py`](../src/oncall/harness_runner.py) launches the pinned DSH
+The isolated runner in [`harness_runner.py`](../src/oncall/harness/runner.py) launches the pinned DSH
 SDK with the profile patch in [`harness/oncall.patch.yml`](../harness/oncall.patch.yml). That patch:
 
 - disables DeepSeek provider and session-upload plugins;
@@ -572,8 +573,8 @@ The complete boundary and extension rules are in
 [Harness skills and tool design](harness-skills-and-tools.md).
 
 DSH's notification callback contains assistant content and complete tool data. The
-`HarnessProgressAdapter` in [`harness_progress.py`](../src/oncall/harness_progress.py) parses bounded
-JSON through [`progress_projection.py`](../src/oncall/progress_projection.py), validates evidence and
+`HarnessProgressAdapter` in [`harness_progress.py`](../src/oncall/harness/progress.py) parses bounded
+JSON through [`progress_projection.py`](../src/oncall/harness/projection.py), validates evidence and
 hypotheses against the domain models, and emits a closed set of fields as JSONL. The projection includes
 model request/retry counts, safe probe parameters, evidence quality, duration and byte count, selected
 typed facts, hypothesis status changes, canonical report rejection reasons, and continuation target/boot
@@ -583,7 +584,7 @@ response for the CLI's guarded conversational path.
 
 `run_harness()` in [`cli.py`](../src/oncall/cli.py) accepts only that protocol and discards other
 container output. The normal view passes each event through
-[`operator_view.py`](../src/oncall/operator_view.py), which suppresses lifecycle and transport noise and
+[`operator_view.py`](../src/oncall/harness/operator_view.py), which suppresses lifecycle and transport noise and
 turns allowlisted typed facts into short natural-language observations. `--verbose` uses
 `progress_message()` for the full safe technical projection. Both renderers validate projected fields
 again, so a forged protocol line cannot become unrestricted terminal content. The progress stream
@@ -598,7 +599,7 @@ broker report can complete the turn.
 
 ## Level 9: persistence and lifecycle
 
-`EvidenceStore` in [`storage.py`](../src/oncall/storage.py) owns four SQLite tables and an artifact
+`EvidenceStore` in [`storage.py`](../src/oncall/broker/storage.py) owns four SQLite tables and an artifact
 directory:
 
 | Storage | Mutability | Purpose |
@@ -746,8 +747,8 @@ flowchart TD
 |---|---|---|
 | What problem and acceptance criteria define the MVP? | [Requirements](requirements.md) | Maps requirements to CLI, probes, evidence, AWS, and evaluation |
 | What are the deployment and trust boundaries? | [Architecture](architecture.md) | Normative boundary for `compose.yaml`, broker, target, and harness |
-| How should Python dependencies and responsibilities be structured? | [Python design](python-design.md) | Normative guide for `domain.py`, `service.py`, adapters, and storage |
-| What can the model observe and how should Linux facts be interpreted? | [Capabilities and evidence](capabilities-and-evidence.md) | Contract for `domain.py`, `probes.py`, and `parsers.py` |
+| How should Python dependencies and responsibilities be structured? | [Python design](python-design.md) | Normative guide for the broker, target, harness, domain, and lab packages |
+| What can the model observe and how should Linux facts be interpreted? | [Capabilities and evidence](capabilities-and-evidence.md) | Contract for `domain.py` and `oncall.target` collectors and parsers |
 | What security and failure behavior must hold? | [Security and reliability](security-and-reliability.md) | Controls in boundary, service, transport, target, storage, Compose, and Terraform |
 | Why were the major choices made? | [Architecture decisions](decisions.md) | ADRs explain separation, evidence immutability, harness choice, and fault strategy |
 | How is AWS provisioned and destroyed? | [AWS and Terraform](aws-terraform.md) | Operator guide for `infra/terraform`, `aws_ssm.py`, and `compose.aws.yaml` |
@@ -762,14 +763,14 @@ Use this table when moving from a diagram or behavior to an implementation revie
 
 | Area | Entry point | Supporting code | Focused tests |
 |---|---|---|---|
-| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`operator_view.py`](../src/oncall/operator_view.py), [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_operator_view.py`](../tests/test_operator_view.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
-| Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs in requirements verification |
-| Broker and model relay | [`broker.py`](../src/oncall/broker.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
+| CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`operator_view.py`](../src/oncall/harness/operator_view.py), [`harness_progress.py`](../src/oncall/harness/progress.py), [`progress_projection.py`](../src/oncall/harness/projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_operator_view.py`](../tests/test_operator_view.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
+| Harness startup and policy | [`harness_runner.py`](../src/oncall/harness/runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs in requirements verification |
+| Broker and model relay | [`broker.py`](../src/oncall/broker/app.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
 | Deterministic provider fixture | [`lab/fixture_provider.py`](../src/oncall/lab/fixture_provider.py) | Broker relay and real DSH runtime | [`test_fixture_provider.py`](../tests/lab/test_fixture_provider.py), fixture acceptance evidence |
-| Application lifecycle | [`service.py`](../src/oncall/service.py) | [`domain.py`](../src/oncall/domain.py) | [`test_service.py`](../tests/test_service.py) |
-| Persistence | [`storage.py`](../src/oncall/storage.py) | Domain evidence/report models | [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py), [`test_evaluation.py`](../tests/lab/test_evaluation.py) |
-| Target HTTP service | [`target.py`](../src/oncall/target.py) | [`transport.py`](../src/oncall/transport.py), [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_target.py`](../tests/test_target.py) |
-| Linux collection | [`probes.py`](../src/oncall/probes.py) | [`parsers.py`](../src/oncall/parsers.py) | [`test_parsers.py`](../tests/test_parsers.py), [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py) |
+| Application lifecycle | [`service.py`](../src/oncall/broker/service.py) | [`domain.py`](../src/oncall/domain.py) | [`test_service.py`](../tests/test_service.py) |
+| Persistence | [`storage.py`](../src/oncall/broker/storage.py) | Domain evidence/report models | [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py), [`test_evaluation.py`](../tests/lab/test_evaluation.py) |
+| Target HTTP service | [`target.py`](../src/oncall/target/app.py) | [`transport.py`](../src/oncall/broker/transport.py), [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_target.py`](../tests/test_target.py) |
+| Linux collection | [`probes.py`](../src/oncall/target/probes.py) | [`parsers.py`](../src/oncall/target/parsers.py) | [`test_parsers.py`](../tests/test_parsers.py), [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py) |
 | Fault injection | [`lab/faults.py`](../src/oncall/lab/faults.py) | [`lab/workload.py`](../src/oncall/lab/workload.py), [`aws_ssm.py`](../src/oncall/aws_ssm.py) | [`test_faults.py`](../tests/lab/test_faults.py), AWS acceptance scripts |
 | Evaluation | [`lab/evaluation.py`](../src/oncall/lab/evaluation.py) | [`evaluate_report.py`](../scripts/lab/evaluate_report.py), [`aws_substrate_matrix.py`](../scripts/lab/aws_substrate_matrix.py) | [`test_evaluation.py`](../tests/lab/test_evaluation.py) |
 | Local deployment | [`compose.yaml`](../compose.yaml) | [`docker/Dockerfile`](../docker/Dockerfile), [`init_lab.py`](../scripts/init_lab.py) | Compose validation and live local runs |
@@ -781,18 +782,18 @@ For a ten-minute architecture review:
 
 1. Read Levels 1–3 in this document.
 2. Open [`compose.yaml`](../compose.yaml) to show process and network isolation.
-3. Open `InvestigationService` in [`service.py`](../src/oncall/service.py) to show centralized budgets
+3. Open `InvestigationService` in [`service.py`](../src/oncall/broker/service.py) to show centralized budgets
    and report validation.
 4. Open `ProbeRequest`, `Observation`, `Evidence`, and `Report` in
    [`domain.py`](../src/oncall/domain.py) to show the typed contract.
-5. Open `LinuxProbe` and `ProbeRegistry` in [`probes.py`](../src/oncall/probes.py) to show the closed
+5. Open `LinuxProbe` and `ProbeRegistry` in [`probes.py`](../src/oncall/target/probes.py) to show the closed
    target capability boundary.
-6. Open `EvidenceStore.add()` in [`storage.py`](../src/oncall/storage.py) to show artifact-before-record
+6. Open `EvidenceStore.add()` in [`storage.py`](../src/oncall/broker/storage.py) to show artifact-before-record
    persistence and hashes.
 7. Finish with the live `oncall investigate` progress stream and exported report.
 
 For a code-quality review, follow the dependency diagram from `domain.py` outward, then inspect the
-protocol and ABC seams in `service.py`, `probes.py`, and `lab/faults.py`. For a security review, follow one
+protocol and ABC seams in `broker/service.py`, `target/probes.py`, and `lab/faults.py`. For a security review, follow one
 request through `http_boundary.py`, Pydantic validation, `InvestigationService`, `HttpTargetClient`,
 and the target idempotency cache. For a Linux review, start with
 [Capabilities and evidence](capabilities-and-evidence.md), then inspect each collector and parser.

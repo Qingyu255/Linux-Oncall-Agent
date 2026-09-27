@@ -21,7 +21,7 @@ Fault injection and cleanup are operator tools with a different authority path. 
 - Network: agent reaches only authenticated broker and fixed provider relay on an internal network. Test denial of target IP, SSM endpoints, metadata addresses, workstation services and arbitrary internet destinations. DNS and forwarding must not provide an alternate route.
 - Credentials: target/provider/AWS secrets stay outside the agent. Scope its token to a single investigation and fixed target; revoke at completion. Relay enforces provider path, request size, duration and token budget rather than accepting arbitrary URLs.
 - Target: in the local lab, no host port and access only from the broker's private target network;
-  bearer authentication, schema validation, a six-capability allowlist, independent duration/output
+  bearer authentication, schema validation, a seven-capability allowlist, independent duration/output
   limits, and rejection of unknown fields. Day 2 replaces this Docker boundary with loopback HTTPS,
   certificate verification, and SSM transport.
 - Execution: fixed executable/argv templates, no shell evaluation, no arbitrary file reader. Resolve mount/cgroup IDs server-side; guard traversal and symlink escapes. Reject stale PID identity.

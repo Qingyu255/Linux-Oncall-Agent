@@ -56,7 +56,7 @@ duplicating schemas and numeric policy limits already enforced by code.
 
 ## Tool contract
 
-The six observation tools return typed `Evidence`; four lifecycle tools expose state, bounded artifact
+The seven observation tools return typed `Evidence`; four lifecycle tools expose state, bounded artifact
 pages, hypotheses, and report submission. Their MCP descriptions explain what each measurement can and
 cannot establish. This matters because a model chooses tools partly from those descriptions.
 

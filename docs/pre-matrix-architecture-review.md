@@ -23,7 +23,7 @@ unavailable trials in the matrix.
 Review:
 
 - `src/oncall/domain.py`: `Report` and claim invariants;
-- `src/oncall/service.py`: `active`, `submit`, `cancel` and terminal-state transitions;
+- `src/oncall/broker/service.py`: `active`, `submit`, `cancel` and terminal-state transitions;
 - `src/oncall/lab/evaluation.py`: unavailable outcome and citation scoring.
 
 ### P0 — current OOM evidence can miss the actual OOM interval
@@ -62,8 +62,8 @@ and keeps the comparison consistent. Healthy receives the same baseline without 
 Review:
 
 - `src/oncall/lab/faults.py`: split `FaultPlan.start` into `prepare` and `trigger`;
-- `src/oncall/probes.py`: cgroup counter semantics and explicit observation interval;
-- `src/oncall/service.py`: trusted pre-observation admission through normal policy/budgets;
+- `src/oncall/target/probes.py`: cgroup counter semantics and explicit observation interval;
+- `src/oncall/broker/service.py`: trusted pre-observation admission through normal policy/budgets;
 - `harness/oncall.patch.yml`: tell the agent to inspect existing run evidence before new probes.
 
 ### P0 — fault leases are shorter than the investigation budget
@@ -89,8 +89,8 @@ in `finally`, verify removal, and call `fail` or `cancel` according to the actua
 Review:
 
 - `src/oncall/cli.py`: `investigate` lines containing `subprocess.run` and the catch-all exception path;
-- `src/oncall/harness_runner.py`: timeout and signal behavior;
-- `src/oncall/storage.py`: persisted finish reason, timing and budgets.
+- `src/oncall/harness/runner.py`: timeout and signal behavior;
+- `src/oncall/broker/storage.py`: persisted finish reason, timing and budgets.
 
 ### P0 — evaluation bundles are not portable after teardown
 
@@ -104,8 +104,8 @@ the completed bundle. The bundle validator must run before Docker or AWS teardow
 
 Review:
 
-- `src/oncall/storage.py`: artifact ownership and hash verification;
-- `src/oncall/broker.py`: admin export boundary;
+- `src/oncall/broker/storage.py`: artifact ownership and hash verification;
+- `src/oncall/broker/app.py`: admin export boundary;
 - `src/oncall/lab/evaluation.py`: atomic bundle writer and bundle validator.
 
 ### P0 — the current Day 4 runner does not execute model trials
@@ -131,7 +131,7 @@ request-field allowlist.
 
 Review:
 
-- `src/oncall/broker.py`: `provider_payload`, `model_calls` and `upstream`;
+- `src/oncall/broker/app.py`: `provider_payload`, `model_calls` and `upstream`;
 - `tests/test_broker.py`: compatibility and provider failure coverage.
 
 ### P1 — evaluation timing and review records are incomplete
@@ -224,12 +224,12 @@ diagnoses.
 ## Suggested review order for the presenter
 
 1. `src/oncall/domain.py` — decide what completed versus inconclusive means.
-2. `src/oncall/lab/faults.py` and `src/oncall/probes.py` — verify the OOM before/after semantics and fault
+2. `src/oncall/lab/faults.py` and `src/oncall/target/probes.py` — verify the OOM before/after semantics and fault
    safety.
-3. `src/oncall/service.py` — inspect budgets, evidence admission and terminal state transitions.
+3. `src/oncall/broker/service.py` — inspect budgets, evidence admission and terminal state transitions.
 4. `src/oncall/lab/evaluation.py` — agree on mechanical gates versus human judgment.
 5. `src/oncall/cli.py` and the planned runner — confirm process ownership and cleanup.
-6. `src/oncall/broker.py` — confirm the provider/key boundary and Terra adaptation.
+6. `src/oncall/broker/app.py` — confirm the provider/key boundary and Terra adaptation.
 7. `harness/oncall.patch.yml` — review the exact behavior requested from the model.
 8. The final OOM and filesystem bundles — trace one claim from report to typed fact to raw artifact.
 

@@ -38,7 +38,7 @@ flowchart LR
 - **CLI:** presents an incident session, progress, diagnoses, and report paths.
 - **Agent runtime:** plans the investigation and chooses among approved tools.
 - **Broker:** owns authorization, target identity, deadlines, budgets, evidence persistence, report validation, and the model relay.
-- **Target probe service:** exposes six bounded Linux observations. There is no arbitrary command endpoint.
+- **Target probe service:** exposes seven bounded Linux observations. There is no arbitrary command endpoint.
 - **Evidence store:** keeps structured metadata in SQLite and larger raw payloads as content-addressed artifacts.
 
 The target may be a Docker container on the same development machine or an EC2 host reached through an AWS Systems Manager tunnel. The trust model and agent-facing tools are the same in both cases.
@@ -107,7 +107,7 @@ Messages remain in the current incident until `/new`. Use `/help` for local comm
 
 ```bash
 .venv/bin/oncall investigate --symptom \
-  "Investigate the current CPU pressure, identify its scope and dominant processes, and cite evidence."
+  "Investigate the current CPU pressure, identify its scope, dominant processes, and owning workload, and cite evidence."
 ```
 
 To create a bounded local CPU scenario first:
@@ -117,7 +117,7 @@ docker compose exec -d target \
   python -m oncall.lab.workload cpu --seconds 120 --workers 2
 
 .venv/bin/oncall investigate --symptom \
-  "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
+  "Investigate the current CPU pressure, identify its scope, dominant processes, and owning workload, cite evidence, consider alternatives, and state limitations."
 ```
 
 The default terminal view summarizes meaningful actions and observations in natural language. Add `--verbose` when you need timings, evidence IDs, byte counts, and model request counts. Complete JSON, evidence references, and Markdown reports are exported under `.local/reports/<investigation-id>/`.
@@ -158,7 +158,7 @@ to `.local/aws/inventory.json` and a 120-second TTL:
 .venv/bin/oncall lab-cpu
 
 .venv/bin/oncall investigate --symptom \
-  "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
+  "Investigate the current CPU pressure, identify its scope, dominant processes, and owning workload, cite evidence, consider alternatives, and state limitations."
 
 .venv/bin/oncall lab-stop
 ```
@@ -192,7 +192,10 @@ The architectural decisions and their tradeoffs are recorded in [Decision record
 ## Project map
 
 ```text
-src/oncall/                 Diagnostic application and domain package
+src/oncall/domain.py        Shared immutable wire and evidence models
+src/oncall/broker/          Trusted policy, persistence, MCP, and target transport
+src/oncall/target/          Authenticated Linux probe service and collectors
+src/oncall/harness/         Sandboxed DSH runner and safe progress projection
 src/oncall/lab/             Synthetic faults, fixtures, and evaluation support
 tests/                      Core parser, policy, lifecycle, and integration tests
 tests/lab/                  Fault, fixture, and evaluator tests
@@ -208,7 +211,7 @@ For code-level orientation, [Python design](docs/python-design.md) maps responsi
 
 ## Current scope and evidence
 
-The Python checks currently cover 79 tests plus Ruff, formatting, strict MyPy, package build, Compose validation, and Terraform validation. Retained AWS substrate trials cover three runs each of CPU, OOM, filesystem, healthy, and unavailable scenarios. Live model evidence includes a human-reviewed Terra CPU diagnosis and a retained semantic failure from a smaller model.
+The Python checks currently cover 86 tests plus Ruff, formatting, strict MyPy, package build, Compose validation, and Terraform validation. Retained AWS substrate trials cover three runs each of CPU, OOM, filesystem, healthy, and unavailable scenarios. Live model evidence includes a human-reviewed Terra CPU diagnosis and a retained semantic failure from a smaller model.
 
 These results demonstrate the end-to-end mechanism and the fault substrate. A complete repeated same-model report-quality matrix is still open. The project also remains a single-operator, single-target MVP with local evidence storage and no automated remediation. [Requirements verification](docs/requirements-verification.md) separates current checks, retained measurements, and remaining gaps so that these claims stay auditable.
 
