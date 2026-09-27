@@ -151,19 +151,24 @@ docker compose -f compose.yaml -f compose.aws.yaml \
 .venv/bin/oncall doctor
 ```
 
-Create a leased fault, investigate it, and clean up the exact workload:
+Create a leased fault, investigate it, and clean up the exact workload. The short commands default
+to `.local/aws/inventory.json` and a 120-second TTL:
 
 ```bash
-.venv/bin/oncall lab-start cpu \
-  --inventory .local/aws/inventory.json \
-  --ttl-seconds 120
+.venv/bin/oncall lab-cpu
 
 .venv/bin/oncall investigate --symptom \
   "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
 
-.venv/bin/oncall lab-stop \
-  --inventory .local/aws/inventory.json
+.venv/bin/oncall lab-stop
 ```
+
+Use `lab-memory` for the bounded cgroup-OOM scenario and `lab-filesystem` for the bounded ENOSPC
+scenario. `lab-start <scenario>` remains available when scripting. Every start installs a target-side
+cleanup watchdog that stops transient units, restores the cgroup memory limit, and removes owned fault
+files after the TTL even if the operator disconnects. Run `lab-stop` after a demonstration when
+possible because it performs the cleanup immediately and verifies that the target is clean. Override
+the defaults with `--inventory PATH` or `--ttl-seconds 30..120`.
 
 When finished, destroy the lab and its bootstrap resources:
 

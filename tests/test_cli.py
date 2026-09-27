@@ -422,7 +422,7 @@ def test_quiet_progress_uses_spinner_for_active_probe_and_keeps_result(monkeypat
         activity=activity,  # type: ignore[arg-type]
     )
 
-    assert activity.updates == ["[cyan]Checking capacity on the lab mount…[/]"]
+    assert activity.updates == ["[cyan]Checking capacity on the target data volume…[/]"]
     assert output.getvalue() == ""
 
     cli.show_progress(
@@ -442,7 +442,26 @@ def test_quiet_progress_uses_spinner_for_active_probe_and_keeps_result(monkeypat
         activity=activity,  # type: ignore[arg-type]
     )
 
-    assert "The lab mount is 99.6% used with 4.0 MiB available" in output.getvalue()
+    assert "The target data volume is 99.6% used with 4.0 MiB available" in output.getvalue()
     assert activity.stops == 1
     assert activity.starts == 1
     assert activity.updates[-1] == cli.DEFAULT_ACTIVITY_MESSAGE
+
+
+def test_lab_shortcuts_use_default_inventory(monkeypatch):
+    calls: list[tuple[str, Path, int]] = []
+
+    def start_fault(scenario: str, inventory: Path, ttl_seconds: int) -> None:
+        calls.append((scenario, inventory, ttl_seconds))
+
+    monkeypatch.setattr(cli, "_start_fault", start_fault)
+
+    cli.lab_cpu()
+    cli.lab_memory()
+    cli.lab_filesystem()
+
+    assert calls == [
+        ("cpu", Path(".local/aws/inventory.json"), 120),
+        ("memory", Path(".local/aws/inventory.json"), 120),
+        ("filesystem", Path(".local/aws/inventory.json"), 120),
+    ]

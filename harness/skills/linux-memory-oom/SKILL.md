@@ -11,9 +11,10 @@ after an OOM, so post-event usage alone cannot rule one out.
 ## Minimum evidence path
 
 1. Call `inspect_memory_pressure` to establish host availability, swap, VM counters, and optional PSI.
-2. Call `inspect_cgroup_memory` for the relevant opaque scope: `self` for the probe service or `lab`
-   for the controlled workload. Its before-and-after event delta is stronger than a single cumulative
-   value.
+2. Call `inspect_cgroup_memory` for the relevant opaque scope: `self` for the target probe service or
+   `lab` for the target workload. These are internal capability identifiers; use "target probe-service
+   cgroup" and "target workload cgroup" in operator-facing prose. Its before-and-after event delta is
+   stronger than a single cumulative value.
 3. Query `oncall-lab-workload.service` or `oncall-target.service` only when a bounded service event can
    establish timing or explain a process exit. Read artifact pages only when the typed journal summary
    is insufficient.

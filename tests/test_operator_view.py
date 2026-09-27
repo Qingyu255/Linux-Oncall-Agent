@@ -37,7 +37,7 @@ def test_filesystem_result_is_natural_and_omits_transport_metadata():
     assert operator_progress_message(progress) == (
         "green",
         "✓",
-        "The lab mount is 99.6% used with 4.0 MiB available.",
+        "The target data volume is 99.6% used with 4.0 MiB available.",
     )
     rendered = str(operator_progress_message(progress))
     assert "208" not in rendered
@@ -62,7 +62,7 @@ def test_empty_journal_has_operator_meaning_instead_of_zero_bytes():
     assert operator_progress_message(progress) == (
         "green",
         "✓",
-        "No recent target-service log entries were found.",
+        "No recent target probe service log entries were found.",
     )
     assert "0 B" not in str(operator_progress_message(progress))
 

@@ -29,6 +29,7 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_AWS_INVENTORY = Path(".local/aws/inventory.json")
 console = Console()
 
 SESSION_COMMAND_SLASHES = str.maketrans({"／": "/", "⁄": "/"})
@@ -687,19 +688,50 @@ def close(run_id: str) -> None:
 @app.command("lab-start")
 def lab_start(
     scenario: str,
-    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
+    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_AWS_INVENTORY,
     ttl_seconds: int = 120,
 ) -> None:
     """Inject one leased fault on an explicitly disposable AWS target."""
+    _start_fault(scenario, inventory, ttl_seconds)
+
+
+def _start_fault(scenario: str, inventory: Path, ttl_seconds: int) -> None:
     if scenario not in SCENARIOS:
         raise typer.BadParameter(f"Scenario must be one of: {', '.join(SCENARIOS)}")
     lease = fault_controller(inventory).start(scenario, ttl_seconds)
     typer.echo(json.dumps(asdict(lease), indent=2))
 
 
+@app.command("lab-cpu")
+def lab_cpu(
+    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_AWS_INVENTORY,
+    ttl_seconds: int = 120,
+) -> None:
+    """Start a bounded CPU-pressure fault on the disposable AWS target."""
+    _start_fault("cpu", inventory, ttl_seconds)
+
+
+@app.command("lab-memory")
+def lab_memory(
+    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_AWS_INVENTORY,
+    ttl_seconds: int = 120,
+) -> None:
+    """Start a bounded cgroup-OOM fault on the disposable AWS target."""
+    _start_fault("memory", inventory, ttl_seconds)
+
+
+@app.command("lab-filesystem")
+def lab_filesystem(
+    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_AWS_INVENTORY,
+    ttl_seconds: int = 120,
+) -> None:
+    """Start a bounded ENOSPC fault on the disposable AWS target data volume."""
+    _start_fault("filesystem", inventory, ttl_seconds)
+
+
 @app.command("lab-stop")
 def lab_stop(
-    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)],
+    inventory: Annotated[Path, typer.Option(exists=True, dir_okay=False)] = DEFAULT_AWS_INVENTORY,
 ) -> None:
     """Stop the exact leased workload and verify that the target is clean."""
     fault_controller(inventory).stop()

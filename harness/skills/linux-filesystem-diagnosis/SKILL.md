@@ -10,8 +10,10 @@ state, service-visible permissions, and an application failure that merely happe
 
 ## Minimum evidence path
 
-1. Call `inspect_filesystem` for the mount named or implied by the symptom. Use `lab` for the
-   controlled service volume and `root` for the root filesystem; never treat them as interchangeable.
+1. Call `inspect_filesystem` for the mount named or implied by the symptom. The internal mount ID
+   `lab` selects the dedicated target data volume; `root` selects the target root filesystem. Never
+   treat them as interchangeable. In operator-facing prose, use those descriptive names rather than
+   calling the target or its filesystem "the lab."
 2. Inspect both `available_bytes` and `available_inodes`, plus filesystem type and
    `probe_view_readonly`. Availability reflects the probe service user's view, which may differ from
    raw free blocks because of reservations.
@@ -27,7 +29,7 @@ state, service-visible permissions, and an application failure that merely happe
 | Very low available bytes and a correlated `errno 28` service event on the same mount and interval | Block-capacity ENOSPC is supported | Which application behavior consumed the space |
 | Available inodes exhausted with blocks remaining and a correlated ENOSPC event | Inode exhaustion is supported | Block exhaustion |
 | Probe view is read-only | Writes through that view are unavailable | ENOSPC; read-only failures normally have a different error class |
-| Lab mount constrained while root retains capacity | Mount-local constraint | Host-wide disk exhaustion |
+| Target data volume constrained while the target root filesystem retains capacity | Mount-local constraint | Host-wide disk exhaustion |
 | Capacity constrained without a service error | Resource risk is established | That a particular write failed because of it |
 
 An empty journal result covers only the approved unit, boot, and bounded time window. It does not prove

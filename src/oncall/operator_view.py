@@ -29,6 +29,21 @@ START_MESSAGES = {
     "submit_report": "Preparing an evidence-backed diagnosis…",
 }
 
+MOUNT_LABELS = {
+    "root": "target root filesystem",
+    "lab": "target data volume",
+}
+
+CGROUP_LABELS = {
+    "self": "target probe-service cgroup",
+    "lab": "target workload cgroup",
+}
+
+UNIT_LABELS = {
+    "oncall-target.service": "target probe service",
+    "oncall-lab-workload.service": "target workload",
+}
+
 
 def _bytes(value: object) -> str | None:
     number = bounded_int(value, 0, 2**63 - 1)
@@ -51,11 +66,11 @@ def _start_message(tool: str, event: dict[str, Any]) -> str | None:
     if tool in {"get_investigation_state", "update_hypothesis", "harness_tool"}:
         return None
     if tool == "inspect_filesystem" and event.get("mount_id") in MOUNTS:
-        return f"Checking capacity on the {event['mount_id']} mount…"
+        return f"Checking capacity on the {MOUNT_LABELS[event['mount_id']]}…"
     if tool == "inspect_cgroup_memory" and event.get("scope_id") in {"self", "lab"}:
-        return f"Checking memory limits and OOM events for the {event['scope_id']} cgroup…"
+        return f"Checking memory limits and OOM events for the {CGROUP_LABELS[event['scope_id']]}…"
     if tool == "query_service_journal" and event.get("unit") in UNITS:
-        service = "target service" if event["unit"] == "oncall-target.service" else "lab workload"
+        service = UNIT_LABELS[event["unit"]]
         return f"Checking recent logs for the {service}…"
     return START_MESSAGES.get(tool)
 
@@ -134,7 +149,7 @@ def _fact_message(value: object) -> str | None:
         used = bounded_float(facts.get("used_percent"), 0, 100)
         available = _bytes(facts.get("available_bytes"))
         if mount in MOUNTS and used is not None:
-            message = f"The {mount} mount is {used:.1f}% used"
+            message = f"The {MOUNT_LABELS[mount]} is {used:.1f}% used"
             if available is not None:
                 message += f" with {available} available"
             return message + "."
@@ -142,7 +157,11 @@ def _fact_message(value: object) -> str | None:
         entries = bounded_int(facts.get("entries"), 0, 10**9)
         if entries is not None:
             unit = facts.get("unit")
-            service = "target-service" if unit == "oncall-target.service" else "lab-workload"
+            if not isinstance(unit, str):
+                return None
+            service = UNIT_LABELS.get(unit)
+            if service is None:
+                return None
             if entries == 0:
                 return f"No recent {service} log entries were found."
             return f"Found {entries} recent {service} log entries."

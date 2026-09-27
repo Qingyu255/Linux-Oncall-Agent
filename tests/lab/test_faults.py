@@ -22,9 +22,18 @@ def test_fault_controller_persists_lease_and_verifies_cleanup(tmp_path):
 
 def test_fault_plans_require_new_oom_and_verify_resource_reset():
     memory = SCENARIOS["memory"].plan(60)
+    watchdog = next(
+        command
+        for command in memory.start
+        if command.startswith("systemd-run --unit=oncall-lab-watchdog")
+    )
+    assert "sleep 60" in watchdog
+    assert "MemoryMax=infinity" in watchdog
+    assert ".oncall-fault.bin" in watchdog
     assert any(".oncall-oom-before" in command for command in memory.start)
     assert any('test "$after" -gt "$before"' in command for command in memory.ready)
     assert any("MemoryMax=infinity" in command for command in memory.cleanup)
     assert any("memory.max" in command for command in memory.verify_clean)
     filesystem = SCENARIOS["filesystem"].plan(60)
+    assert any("oncall-lab-watchdog" in command for command in filesystem.start)
     assert any("blocks * size" in command for command in filesystem.verify_clean)

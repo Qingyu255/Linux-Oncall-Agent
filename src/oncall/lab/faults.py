@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -43,8 +44,9 @@ class FaultScenario(ABC):
     def plan(self, ttl_seconds: int) -> FaultPlan: ...
 
     @staticmethod
-    def common_cleanup() -> tuple[str, ...]:
+    def target_cleanup() -> tuple[str, ...]:
         return (
+            "systemctl set-property oncall-lab.slice MemoryMax=infinity >/dev/null 2>&1 || true",
             "systemctl stop oncall-lab-workload.service oncall-lab-sentinel.service "
             ">/dev/null 2>&1 || true",
             "systemctl reset-failed oncall-lab-workload.service oncall-lab-sentinel.service "
@@ -53,6 +55,23 @@ class FaultScenario(ABC):
             "/var/lib/oncall-lab/data/.oncall-fault-ready "
             "/var/lib/oncall-lab/data/.oncall-write-probe "
             "/var/lib/oncall-lab/data/.oncall-oom-before",
+        )
+
+    @classmethod
+    def common_cleanup(cls) -> tuple[str, ...]:
+        return (
+            "systemctl stop oncall-lab-watchdog.service >/dev/null 2>&1 || true",
+            "systemctl reset-failed oncall-lab-watchdog.service >/dev/null 2>&1 || true",
+            *cls.target_cleanup(),
+        )
+
+    @classmethod
+    def start_watchdog(cls, ttl_seconds: int) -> str:
+        cleanup = "; ".join(cls.target_cleanup())
+        script = f"sleep {ttl_seconds}; {cleanup}"
+        return (
+            "systemd-run --unit=oncall-lab-watchdog "
+            f"--property=RuntimeMaxSec={ttl_seconds + 30} /bin/sh -c {shlex.quote(script)}"
         )
 
 
@@ -64,6 +83,7 @@ class CpuScenario(FaultScenario):
             start=(
                 "set -e",
                 *self.common_cleanup(),
+                self.start_watchdog(ttl_seconds),
                 f"systemd-run --unit=oncall-lab-workload --property=RuntimeMaxSec={ttl_seconds} "
                 "/opt/oncall/bin/python -m oncall.lab.workload cpu --seconds "
                 f"{ttl_seconds - 5} --workers 2",
@@ -77,6 +97,7 @@ class CpuScenario(FaultScenario):
             cleanup=self.common_cleanup(),
             verify_clean=(
                 "set -e",
+                "! systemctl is-active --quiet oncall-lab-watchdog.service",
                 "! systemctl is-active --quiet oncall-lab-workload.service",
                 "test ! -e /var/lib/oncall-lab/data/.oncall-fault.bin",
                 "echo clean",
@@ -88,14 +109,11 @@ class MemoryScenario(FaultScenario):
     name: ScenarioName = "memory"
 
     def plan(self, ttl_seconds: int) -> FaultPlan:
-        cleanup = (
-            "systemctl set-property oncall-lab.slice MemoryMax=infinity >/dev/null 2>&1 || true",
-            *self.common_cleanup(),
-        )
         return FaultPlan(
             start=(
                 "set -e",
                 *self.common_cleanup(),
+                self.start_watchdog(ttl_seconds),
                 f"systemd-run --unit=oncall-lab-sentinel --slice=oncall-lab.slice "
                 f"--property=RuntimeMaxSec={ttl_seconds} /usr/bin/sleep {ttl_seconds - 5}",
                 "awk '$1 == \"oom_kill\" {print $2}' "
@@ -116,9 +134,10 @@ class MemoryScenario(FaultScenario):
                 "systemctl is-active --quiet oncall-lab-sentinel.service",
                 "echo ready",
             ),
-            cleanup=cleanup,
+            cleanup=self.common_cleanup(),
             verify_clean=(
                 "set -e",
+                "! systemctl is-active --quiet oncall-lab-watchdog.service",
                 "! systemctl is-active --quiet oncall-lab-sentinel.service",
                 "! systemctl is-active --quiet oncall-lab-workload.service",
                 "test ! -e /sys/fs/cgroup/oncall.slice/oncall-lab.slice/memory.max || "
@@ -137,6 +156,7 @@ class FilesystemScenario(FaultScenario):
             start=(
                 "set -e",
                 *self.common_cleanup(),
+                self.start_watchdog(ttl_seconds),
                 f"systemd-run --unit=oncall-lab-workload --uid=oncall "
                 f"--property=RuntimeMaxSec={ttl_seconds} /opt/oncall/bin/python "
                 f"-m oncall.lab.workload filesystem --seconds {ttl_seconds - 5} "
@@ -153,6 +173,7 @@ class FilesystemScenario(FaultScenario):
             cleanup=self.common_cleanup(),
             verify_clean=(
                 "set -e",
+                "! systemctl is-active --quiet oncall-lab-watchdog.service",
                 "test ! -e /var/lib/oncall-lab/data/.oncall-fault.bin",
                 "test ! -e /var/lib/oncall-lab/data/.oncall-fault-ready",
                 "test ! -e /var/lib/oncall-lab/data/.oncall-write-probe",
