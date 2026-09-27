@@ -114,7 +114,7 @@ To create a bounded local CPU scenario first:
 
 ```bash
 docker compose exec -d target \
-  python -m oncall.lab_fault cpu --seconds 120 --workers 2
+  python -m oncall.lab.workload cpu --seconds 120 --workers 2
 
 .venv/bin/oncall investigate --symptom \
   "Investigate the current CPU pressure, identify its scope and dominant processes, cite evidence, consider alternatives, and state limitations."
@@ -187,9 +187,12 @@ The architectural decisions and their tradeoffs are recorded in [Decision record
 ## Project map
 
 ```text
-src/oncall/                 Python application and domain packages
-tests/                      Parser, policy, lifecycle, and integration tests
-scripts/                    Local initialization, evaluation, and AWS lifecycle tools
+src/oncall/                 Diagnostic application and domain package
+src/oncall/lab/             Synthetic faults, fixtures, and evaluation support
+tests/                      Core parser, policy, lifecycle, and integration tests
+tests/lab/                  Fault, fixture, and evaluator tests
+scripts/                    Local initialization and AWS lifecycle entry points
+scripts/lab/                Acceptance and evaluation runners
 infra/terraform/            Bootstrap and disposable lab infrastructure
 docker/                     Trusted and untrusted container definitions
 docs/                       Architecture, operations, evaluation, and decisions
@@ -200,7 +203,7 @@ For code-level orientation, [Python design](docs/python-design.md) maps responsi
 
 ## Current scope and evidence
 
-The core Python checks currently cover 72 tests plus Ruff, formatting, strict MyPy, package build, Compose validation, and Terraform validation. Retained AWS substrate trials cover three runs each of CPU, OOM, filesystem, healthy, and unavailable scenarios. Live model evidence includes a human-reviewed Terra CPU diagnosis and a retained semantic failure from a smaller model.
+The Python checks currently cover 79 tests plus Ruff, formatting, strict MyPy, package build, Compose validation, and Terraform validation. Retained AWS substrate trials cover three runs each of CPU, OOM, filesystem, healthy, and unavailable scenarios. Live model evidence includes a human-reviewed Terra CPU diagnosis and a retained semantic failure from a smaller model.
 
 These results demonstrate the end-to-end mechanism and the fault substrate. A complete repeated same-model report-quality matrix is still open. The project also remains a single-operator, single-target MVP with local evidence storage and no automated remediation. [Requirements verification](docs/requirements-verification.md) separates current checks, retained measurements, and remaining gaps so that these claims stay auditable.
 

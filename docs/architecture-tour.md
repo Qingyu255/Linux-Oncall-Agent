@@ -422,7 +422,7 @@ The design uses patterns where they carry a concrete boundary:
 | Dependency inversion | `TargetClient` protocol in [`service.py`](../src/oncall/service.py) | Application policy can be tested without HTTP, Docker, or AWS |
 | Template method | `LinuxProbe.collect()` plus subclass `_collect()` in [`probes.py`](../src/oncall/probes.py) | Provenance, timing, quality, and error conversion remain consistent across collectors |
 | Registry | `ProbeRegistry` in [`probes.py`](../src/oncall/probes.py) | A closed capability name selects a fixed implementation without model-provided commands |
-| Strategy | `FaultScenario` and CPU/memory/filesystem strategies in [`faults.py`](../src/oncall/faults.py) | Each fault has distinct setup, readiness, cleanup, and cleanup verification |
+| Strategy | `FaultScenario` and CPU/memory/filesystem strategies in [`lab/faults.py`](../src/oncall/lab/faults.py) | Each fault has distinct setup, readiness, cleanup, and cleanup verification |
 | Adapter | `HttpTargetClient`, `HarnessProgressAdapter`, and `SsmTunnel` | HTTP, DSH notifications, and AWS sessions stay outside the domain |
 | Facade | `InvestigationService` and `FaultController` | Callers use a small lifecycle API while enforcement remains centralized |
 
@@ -534,7 +534,7 @@ of six names to a fixed collector.
 
 [`parsers.py`](../src/oncall/parsers.py) converts kernel text formats into typed values.
 [`tests/test_parsers.py`](../tests/test_parsers.py) covers parsing edge cases;
-[`tests/test_day3.py`](../tests/test_day3.py) covers memory, filesystem, journal, and artifact behavior;
+[`tests/test_observation_pipeline.py`](../tests/test_observation_pipeline.py) covers memory, filesystem, journal, and artifact behavior;
 [`tests/test_target.py`](../tests/test_target.py) covers the HTTP/idempotency boundary.
 
 ## Level 8: broker, harness, and model relay
@@ -551,7 +551,7 @@ The broker is one process with three surfaces:
 `InvestigationService`, one `EvidenceStore`, and one fixed `HttpTargetClient`. The relay removes all
 request fields outside its allowlist, caps model output, rejects a model other than the configured
 one, limits calls, and never returns upstream error bodies. Terra compatibility is applied in
-`provider_payload()`. Fixture mode uses [`fixture_provider.py`](../src/oncall/fixture_provider.py) to
+`provider_payload()`. Fixture mode uses [`lab/fixture_provider.py`](../src/oncall/lab/fixture_provider.py) to
 exercise the real harness, MCP, evidence, and report path deterministically without claiming model
 reasoning quality.
 
@@ -672,8 +672,8 @@ TTL, and the five-generation bound.
 
 ## Level 10: fault lab and evaluation
 
-Fault injection is a separate operator-only path. The model cannot call it. `FaultController` in
-[`faults.py`](../src/oncall/faults.py) selects a scenario strategy, writes a local lease before
+Fault injection is a separate operator-only path under `oncall.lab`. The model cannot call it.
+`FaultController` in [`lab/faults.py`](../src/oncall/lab/faults.py) selects a scenario strategy, writes a local lease before
 mutation, waits for a scenario-specific readiness condition, and verifies cleanup. Remote execution
 uses SSM Run Command through `SsmOperatorExecutor`.
 
@@ -691,8 +691,8 @@ flowchart LR
 
 CPU uses two bounded workers. Memory uses a dedicated systemd slice with a 48 MiB limit and preserves
 the pre-fault OOM counter. Filesystem fills only the dedicated lab EBS volume and proves controlled
-`errno 28`. Implementations are in [`lab_fault.py`](../src/oncall/lab_fault.py) and
-[`faults.py`](../src/oncall/faults.py).
+`errno 28`. Implementations are in [`lab/workload.py`](../src/oncall/lab/workload.py) and
+[`lab/faults.py`](../src/oncall/lab/faults.py).
 
 Evaluation deliberately separates two questions:
 
@@ -700,9 +700,10 @@ Evaluation deliberately separates two questions:
 2. **Diagnostic quality:** did the model identify cause and scope, cite valid evidence, consider
    alternatives, state limits, and avoid unsupported claims?
 
-`TrialScorer` and `EvaluationBundleWriter` in [`evaluation.py`](../src/oncall/evaluation.py) implement
-the evidence gates and reproducible bundle. [`aws_day4_trials.py`](../scripts/aws_day4_trials.py) runs
-the substrate matrix. [`evaluate_report.py`](../scripts/evaluate_report.py) scores a model report.
+`TrialScorer` and `EvaluationBundleWriter` in
+[`lab/evaluation.py`](../src/oncall/lab/evaluation.py) implement the evidence gates and reproducible
+bundle. [`aws_substrate_matrix.py`](../scripts/lab/aws_substrate_matrix.py) runs the substrate matrix.
+[`evaluate_report.py`](../scripts/lab/evaluate_report.py) scores a model report.
 The methodology and demo sequence are in [Evaluation and demo](evaluation-and-demo.md); measured
 results are in [Requirements verification](requirements-verification.md).
 
@@ -750,7 +751,7 @@ flowchart TD
 | What security and failure behavior must hold? | [Security and reliability](security-and-reliability.md) | Controls in boundary, service, transport, target, storage, Compose, and Terraform |
 | Why were the major choices made? | [Architecture decisions](decisions.md) | ADRs explain separation, evidence immutability, harness choice, and fault strategy |
 | How is AWS provisioned and destroyed? | [AWS and Terraform](aws-terraform.md) | Operator guide for `infra/terraform`, `aws_ssm.py`, and `compose.aws.yaml` |
-| How are scenarios and reports scored? | [Evaluation and demo](evaluation-and-demo.md) | Guide for `faults.py`, `evaluation.py`, and scripts |
+| How are scenarios and reports scored? | [Evaluation and demo](evaluation-and-demo.md) | Guide for `oncall.lab`, evaluation runners, and acceptance scripts |
 | Which requirements have fresh proof? | [Requirements verification](requirements-verification.md) | Commands, outputs, scenario construction, and teardown evidence |
 | What remains before release? | [Release hardening](release-hardening-plan.md) and [pre-matrix review](pre-matrix-architecture-review.md) | Prioritized gaps; do not treat these planned fixes as current behavior |
 | What was implemented in each phase? | [Implementation plan](implementation-plan.md) | Consolidated chronology plus completed and open phase checklist |
@@ -764,15 +765,15 @@ Use this table when moving from a diagram or behavior to an implementation revie
 | CLI and report presentation | [`cli.py`](../src/oncall/cli.py) | [`operator_view.py`](../src/oncall/operator_view.py), [`harness_progress.py`](../src/oncall/harness_progress.py), [`progress_projection.py`](../src/oncall/progress_projection.py) | [`test_cli.py`](../tests/test_cli.py), [`test_operator_view.py`](../tests/test_operator_view.py), [`test_harness_progress.py`](../tests/test_harness_progress.py) |
 | Harness startup and policy | [`harness_runner.py`](../src/oncall/harness_runner.py) | [`oncall.patch.yml`](../harness/oncall.patch.yml), [`harness/skills`](../harness/skills) | Live DSH runs in requirements verification |
 | Broker and model relay | [`broker.py`](../src/oncall/broker.py) | [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_broker.py`](../tests/test_broker.py), [`test_boundary.py`](../tests/test_boundary.py) |
-| Deterministic provider fixture | [`fixture_provider.py`](../src/oncall/fixture_provider.py) | Broker relay and real DSH runtime | [`test_broker.py`](../tests/test_broker.py), fixture acceptance evidence |
+| Deterministic provider fixture | [`lab/fixture_provider.py`](../src/oncall/lab/fixture_provider.py) | Broker relay and real DSH runtime | [`test_fixture_provider.py`](../tests/lab/test_fixture_provider.py), fixture acceptance evidence |
 | Application lifecycle | [`service.py`](../src/oncall/service.py) | [`domain.py`](../src/oncall/domain.py) | [`test_service.py`](../tests/test_service.py) |
-| Persistence | [`storage.py`](../src/oncall/storage.py) | Domain evidence/report models | [`test_day3.py`](../tests/test_day3.py), [`test_evaluation.py`](../tests/test_evaluation.py) |
+| Persistence | [`storage.py`](../src/oncall/storage.py) | Domain evidence/report models | [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py), [`test_evaluation.py`](../tests/lab/test_evaluation.py) |
 | Target HTTP service | [`target.py`](../src/oncall/target.py) | [`transport.py`](../src/oncall/transport.py), [`http_boundary.py`](../src/oncall/http_boundary.py) | [`test_target.py`](../tests/test_target.py) |
-| Linux collection | [`probes.py`](../src/oncall/probes.py) | [`parsers.py`](../src/oncall/parsers.py) | [`test_parsers.py`](../tests/test_parsers.py), [`test_day3.py`](../tests/test_day3.py) |
-| Fault injection | [`faults.py`](../src/oncall/faults.py) | [`lab_fault.py`](../src/oncall/lab_fault.py), [`aws_ssm.py`](../src/oncall/aws_ssm.py) | [`test_evaluation.py`](../tests/test_evaluation.py), AWS acceptance scripts |
-| Evaluation | [`evaluation.py`](../src/oncall/evaluation.py) | [`evaluate_report.py`](../scripts/evaluate_report.py), [`aws_day4_trials.py`](../scripts/aws_day4_trials.py) | [`test_evaluation.py`](../tests/test_evaluation.py) |
+| Linux collection | [`probes.py`](../src/oncall/probes.py) | [`parsers.py`](../src/oncall/parsers.py) | [`test_parsers.py`](../tests/test_parsers.py), [`test_observation_pipeline.py`](../tests/test_observation_pipeline.py) |
+| Fault injection | [`lab/faults.py`](../src/oncall/lab/faults.py) | [`lab/workload.py`](../src/oncall/lab/workload.py), [`aws_ssm.py`](../src/oncall/aws_ssm.py) | [`test_faults.py`](../tests/lab/test_faults.py), AWS acceptance scripts |
+| Evaluation | [`lab/evaluation.py`](../src/oncall/lab/evaluation.py) | [`evaluate_report.py`](../scripts/lab/evaluate_report.py), [`aws_substrate_matrix.py`](../scripts/lab/aws_substrate_matrix.py) | [`test_evaluation.py`](../tests/lab/test_evaluation.py) |
 | Local deployment | [`compose.yaml`](../compose.yaml) | [`docker/Dockerfile`](../docker/Dockerfile), [`init_lab.py`](../scripts/init_lab.py) | Compose validation and live local runs |
-| AWS deployment | [`lab/main.tf`](../infra/terraform/environments/lab/main.tf) | [`bootstrap/main.tf`](../infra/terraform/bootstrap/main.tf), [`cloud-init.sh.tftpl`](../infra/terraform/templates/cloud-init.sh.tftpl), [`compose.aws.yaml`](../compose.aws.yaml) | [`aws_acceptance.py`](../scripts/aws_acceptance.py), repeated acceptance scripts |
+| AWS deployment | [`lab/main.tf`](../infra/terraform/environments/lab/main.tf) | [`bootstrap/main.tf`](../infra/terraform/bootstrap/main.tf), [`cloud-init.sh.tftpl`](../infra/terraform/templates/cloud-init.sh.tftpl), [`compose.aws.yaml`](../compose.aws.yaml) | [`aws_remote_acceptance.py`](../scripts/lab/aws_remote_acceptance.py), repeated acceptance scripts |
 
 ## Suggested review paths
 
@@ -791,7 +792,7 @@ For a ten-minute architecture review:
 7. Finish with the live `oncall investigate` progress stream and exported report.
 
 For a code-quality review, follow the dependency diagram from `domain.py` outward, then inspect the
-protocol and ABC seams in `service.py`, `probes.py`, and `faults.py`. For a security review, follow one
+protocol and ABC seams in `service.py`, `probes.py`, and `lab/faults.py`. For a security review, follow one
 request through `http_boundary.py`, Pydantic validation, `InvestigationService`, `HttpTargetClient`,
 and the target idempotency cache. For a Linux review, start with
 [Capabilities and evidence](capabilities-and-evidence.md), then inspect each collector and parser.

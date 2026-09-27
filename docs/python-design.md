@@ -17,19 +17,30 @@ src/oncall/
   transport.py       # fixed-destination target client
   target.py          # authenticated typed target API
   broker.py          # composition root, MCP tools and fixed model relay
-  fixture_provider.py# keyless protocol fixture; not model reasoning
   harness_runner.py  # DSH SDK entry point for the sandbox container
   http_boundary.py   # authentication and request-size boundary
-  faults.py          # operator-only fault strategies, leases and cleanup facade
-  lab_fault.py       # bounded target-side CPU, memory and filesystem workloads
-  evaluation.py      # deterministic gates and private run bundles
   cli.py             # trusted operator interface and report rendering
-tests/                # parser, policy, boundary and lifecycle tests
+  lab/               # synthetic validation support, outside diagnostic logic
+    faults.py        # operator-only fault strategies, leases and cleanup facade
+    workload.py      # bounded target-side CPU, memory and filesystem workloads
+    fixture_provider.py # keyless protocol fixture; not model reasoning
+    evaluation.py    # deterministic gates and private run bundles
+tests/                # diagnostic parser, policy, boundary and lifecycle tests
+  lab/                # fault, fixture, and evaluator tests
+scripts/
+  lab/                # AWS acceptance and report-evaluation runners
 harness/              # pinned DSH patch profile
 docker/               # multi-stage local images
-  infra/terraform/      # disposable AWS target and bootstrap roots
+infra/terraform/      # disposable AWS target and bootstrap roots
 docs/
 ```
+
+The `oncall.lab` package may depend on diagnostic contracts such as `oncall.domain` and AWS transport.
+Diagnostic domain, probe, service, storage, and target modules do not import `oncall.lab`. The trusted
+CLI composes optional fault commands, and the broker imports only the deterministic fixture adapter
+used by explicit fixture mode. A package-boundary test permits those two composition roots while
+preventing diagnostic modules from depending on lab implementation. This keeps synthetic scenario
+truth and scoring out of the evidence-collection path.
 
 ```mermaid
 flowchart LR

@@ -20,14 +20,14 @@ flowchart LR
     Matrix --> Teardown[Docker and AWS inventories empty]
 ```
 
-## Current repository checks — 2026-09-26
+## Current repository checks — 2026-09-27
 
 | Check | Command | Result |
 |---|---|---|
 | Lint | `.venv/bin/ruff check src tests scripts` | `All checks passed!` |
 | Formatting | `.venv/bin/ruff format --check src tests scripts` | Pass |
 | Strict typing | `.venv/bin/mypy` | Pass over the complete runtime package |
-| Automated tests | `.venv/bin/pytest -q` | `77 passed` |
+| Automated tests | `.venv/bin/pytest -q` | `79 passed` |
 | Package | `.venv/bin/python -m build --no-isolation` | sdist and wheel built successfully |
 | Compose | `docker compose --profile agent config --quiet` | Pass |
 | Container smoke | fixture-mode `oncall doctor` and `oncall investigate` | Readiness and accepted report passed through rebuilt target, broker, and agent images |
@@ -78,7 +78,7 @@ A 90-second/two-worker CPU condition was created with:
 
 ```bash
 docker compose exec -d target \
-  python -m oncall.lab_fault cpu --seconds 90 --workers 2
+  python -m oncall.lab.workload cpu --seconds 90 --workers 2
 ```
 
 Fixture run `83df0d492d504051922990e0f8bc797d` completed through DSH and MCP in 10.3 seconds:

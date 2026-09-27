@@ -24,7 +24,7 @@ Review:
 
 - `src/oncall/domain.py`: `Report` and claim invariants;
 - `src/oncall/service.py`: `active`, `submit`, `cancel` and terminal-state transitions;
-- `src/oncall/evaluation.py`: unavailable outcome and citation scoring.
+- `src/oncall/lab/evaluation.py`: unavailable outcome and citation scoring.
 
 ### P0 — current OOM evidence can miss the actual OOM interval
 
@@ -61,7 +61,7 @@ and keeps the comparison consistent. Healthy receives the same baseline without 
 
 Review:
 
-- `src/oncall/faults.py`: split `FaultPlan.start` into `prepare` and `trigger`;
+- `src/oncall/lab/faults.py`: split `FaultPlan.start` into `prepare` and `trigger`;
 - `src/oncall/probes.py`: cgroup counter semantics and explicit observation interval;
 - `src/oncall/service.py`: trusted pre-observation admission through normal policy/budgets;
 - `harness/oncall.patch.yml`: tell the agent to inspect existing run evidence before new probes.
@@ -106,12 +106,12 @@ Review:
 
 - `src/oncall/storage.py`: artifact ownership and hash verification;
 - `src/oncall/broker.py`: admin export boundary;
-- `src/oncall/evaluation.py`: atomic bundle writer and bundle validator.
+- `src/oncall/lab/evaluation.py`: atomic bundle writer and bundle validator.
 
 ### P0 — the current Day 4 runner does not execute model trials
 
-`scripts/aws_day4_trials.py` correctly labels itself as substrate reliability. It calls target probes
-directly and cannot satisfy the model-quality matrix. `scripts/evaluate_report.py` relies on manually
+`scripts/lab/aws_substrate_matrix.py` correctly labels itself as substrate reliability. It calls target
+probes directly and cannot satisfy the model-quality matrix. `scripts/lab/evaluate_report.py` relies on manually
 provided model, expected outcome, setup and cleanup flags, which makes a full matrix error-prone.
 
 Create one trusted matrix coordinator that derives those fields from its scenario plan and recorded
@@ -224,10 +224,10 @@ diagnoses.
 ## Suggested review order for the presenter
 
 1. `src/oncall/domain.py` — decide what completed versus inconclusive means.
-2. `src/oncall/faults.py` and `src/oncall/probes.py` — verify the OOM before/after semantics and fault
+2. `src/oncall/lab/faults.py` and `src/oncall/probes.py` — verify the OOM before/after semantics and fault
    safety.
 3. `src/oncall/service.py` — inspect budgets, evidence admission and terminal state transitions.
-4. `src/oncall/evaluation.py` — agree on mechanical gates versus human judgment.
+4. `src/oncall/lab/evaluation.py` — agree on mechanical gates versus human judgment.
 5. `src/oncall/cli.py` and the planned runner — confirm process ownership and cleanup.
 6. `src/oncall/broker.py` — confirm the provider/key boundary and Terra adaptation.
 7. `harness/oncall.patch.yml` — review the exact behavior requested from the model.
