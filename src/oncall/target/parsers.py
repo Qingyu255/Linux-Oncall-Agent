@@ -43,6 +43,7 @@ def cpu_percentages(before: CpuTicks, after: CpuTicks) -> tuple[float, float, fl
 class ProcessTicks:
     pid: int
     name: str
+    parent_pid: int
     ticks: int
     start_ticks: int
     rss_pages: int
@@ -55,6 +56,7 @@ def parse_process_stat(text: str) -> ProcessTicks:
     return ProcessTicks(
         int(text[:left].strip()),
         name,
+        int(fields[1]),
         int(fields[11]) + int(fields[12]),
         int(fields[19]),
         max(0, int(fields[21])),

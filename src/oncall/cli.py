@@ -18,10 +18,10 @@ from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 
-from oncall.harness_progress import PROGRESS_PROTOCOL, progress_message
+from oncall.harness.operator_view import operator_progress_message
+from oncall.harness.progress import PROGRESS_PROTOCOL, progress_message
+from oncall.harness.projection import bounded_assistant_response
 from oncall.lab.faults import SCENARIOS, FaultController, SsmOperatorExecutor
-from oncall.operator_view import operator_progress_message
-from oncall.progress_projection import bounded_assistant_response
 
 app = typer.Typer(
     help="Evidence-driven Linux incident investigation",

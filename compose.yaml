@@ -15,7 +15,7 @@ services:
     <<: *security
     build: {context: ., dockerfile: docker/Dockerfile, target: target}
     image: linux-oncall-target:day1
-    command: [uvicorn, oncall.target:create_app, --factory, --host, 0.0.0.0, --port, "8765", --no-access-log]
+    command: [uvicorn, oncall.target.app:create_app, --factory, --host, 0.0.0.0, --port, "8765", --no-access-log]
     networks: [target_net]
     secrets: [target_token]
     volumes: ["labdata:/var/lib/oncall-lab/data:ro"]
@@ -32,7 +32,7 @@ services:
     <<: *security
     image: linux-oncall-core:day1
     build: {context: ., dockerfile: docker/Dockerfile, target: core}
-    command: [uvicorn, oncall.broker:create_app, --factory, --host, 0.0.0.0, --port, "8787", --no-access-log]
+    command: [uvicorn, oncall.broker.app:create_app, --factory, --host, 0.0.0.0, --port, "8787", --no-access-log]
     networks: [agent_net, target_net, egress]
     sysctls: {net.ipv4.ip_forward: "0"}
     ports: ["127.0.0.1:8787:8787"]
@@ -57,7 +57,7 @@ services:
     profiles: [agent]
     build: {context: ., dockerfile: docker/Dockerfile, target: agent}
     image: linux-oncall-agent:day1
-    entrypoint: [python, -m, oncall.harness_runner]
+    entrypoint: [python, -m, oncall.harness.runner]
     networks: [agent_net]
     secrets: [agent_token]
     tmpfs:

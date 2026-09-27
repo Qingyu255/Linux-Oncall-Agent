@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import pytest
 from pydantic import ValidationError
 
+from oncall.broker.service import InvestigationService
+from oncall.broker.storage import EvidenceStore
 from oncall.domain import (
     Claim,
     CpuFacts,
@@ -12,11 +14,12 @@ from oncall.domain import (
     Observation,
     PolicyError,
     ProbeRequest,
+    ProcessFacts,
+    ProcessIdentityFacts,
+    ProcessRanking,
     Report,
     utcnow,
 )
-from oncall.service import InvestigationService
-from oncall.storage import EvidenceStore
 
 
 def observation(request, target_id="test-target", boot_id="boot-1"):
@@ -59,6 +62,50 @@ class Target:
 class UnavailableTarget:
     async def collect(self, request):
         raise ConnectionError("sensitive transport detail")
+
+
+@dataclass
+class ProcessTarget:
+    async def collect(self, request):
+        if request.name == "rank_processes":
+            facts = ProcessRanking(
+                processes=(
+                    ProcessFacts(
+                        pid=2516,
+                        start_ticks=658846,
+                        name="python",
+                        cpu_pct_one_core=100,
+                        rss_bytes=1024,
+                    ),
+                ),
+                scanned=4,
+                disappeared=0,
+                scan_limited=False,
+            )
+        else:
+            facts = ProcessIdentityFacts(
+                pid=2516,
+                start_ticks=658846,
+                name="python",
+                parent_pid=1,
+                uid=1000,
+                executable="/opt/oncall/bin/python",
+                argv=("/opt/oncall/bin/python", "-m", "oncall.lab.workload", "cpu"),
+                cgroup_path="/system.slice/oncall-lab-workload.service",
+                systemd_unit="oncall-lab-workload.service",
+            )
+        raw = facts.model_dump_json()
+        return Observation(
+            target_id="test-target",
+            boot_id="boot-1",
+            request=request,
+            started_at=utcnow(),
+            completed_at=utcnow(),
+            duration_ms=1,
+            facts=facts,
+            raw=raw,
+            raw_bytes=len(raw.encode()),
+        )
 
 
 @pytest.fixture
@@ -111,6 +158,27 @@ async def test_citations_and_artifacts_are_scoped(service):
     assert service.state()["status"] == "inconclusive"
     with pytest.raises(PolicyError):
         await service.probe(ProbeRequest(name="sample_cpu_pressure"))
+
+
+async def test_process_identity_requires_current_ranked_pid_and_start_ticks(tmp_path):
+    store = EvidenceStore(tmp_path)
+    service = InvestigationService(ProcessTarget(), store)
+    service.begin("test")
+    request = ProbeRequest(name="inspect_process_identity", pid=2516, start_ticks=658846)
+
+    with pytest.raises(PolicyError, match="current investigation ranking"):
+        await service.probe(request)
+    assert service.calls == 0
+
+    await service.probe(ProbeRequest(name="rank_processes"))
+    identity = await service.probe(request)
+    assert identity.facts is not None and identity.facts.kind == "process_identity"
+
+    with pytest.raises(PolicyError, match="current investigation ranking"):
+        await service.probe(
+            ProbeRequest(name="inspect_process_identity", pid=2516, start_ticks=658847)
+        )
+    store.close()
 
 
 async def test_completed_claim_can_cite_fields_across_multiple_evidence_items(service):

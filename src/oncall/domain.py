@@ -17,6 +17,7 @@ class Value(BaseModel):
 ProbeName = Literal[
     "sample_cpu_pressure",
     "rank_processes",
+    "inspect_process_identity",
     "inspect_memory_pressure",
     "inspect_cgroup_memory",
     "inspect_filesystem",
@@ -34,11 +35,17 @@ class ProbeRequest(Value):
     mount_id: Literal["root", "lab"] | None = None
     unit: Literal["oncall-target.service", "oncall-lab-workload.service"] | None = None
     since_seconds: Annotated[int, Field(strict=True, ge=1, le=900)] = 300
+    pid: Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)] | None = None
+    start_ticks: Annotated[int, Field(strict=True, ge=1)] | None = None
 
     @model_validator(mode="after")
     def fields_match_probe(self) -> "ProbeRequest":
         if self.name == "rank_processes" and self.limit > 20:
             raise ValueError("Process ranking is limited to 20 entries")
+        if self.name == "inspect_process_identity" and (
+            self.pid is None or self.start_ticks is None
+        ):
+            raise ValueError("Process PID and start ticks are required")
         if self.name == "inspect_cgroup_memory" and self.scope_id is None:
             raise ValueError("Cgroup scope_id is required")
         if self.name == "inspect_filesystem" and self.mount_id is None:
@@ -51,6 +58,10 @@ class ProbeRequest(Value):
             raise ValueError("mount_id is not accepted by this probe")
         if self.name != "query_service_journal" and self.unit is not None:
             raise ValueError("unit is not accepted by this probe")
+        if self.name != "inspect_process_identity" and (
+            self.pid is not None or self.start_ticks is not None
+        ):
+            raise ValueError("Process identity is not accepted by this probe")
         return self
 
 
@@ -91,6 +102,20 @@ class ProcessRanking(Value):
     scanned: int
     disappeared: int
     scan_limited: bool
+
+
+class ProcessIdentityFacts(Value):
+    kind: Literal["process_identity"] = "process_identity"
+    pid: Annotated[int, Field(ge=1, le=2**31 - 1)]
+    start_ticks: Annotated[int, Field(ge=1)]
+    name: Annotated[str, Field(max_length=128)]
+    parent_pid: Annotated[int, Field(ge=0, le=2**31 - 1)]
+    uid: Annotated[int, Field(ge=0, le=2**32 - 1)] | None
+    executable: Annotated[str, Field(max_length=512)] | None
+    argv: tuple[Annotated[str, Field(max_length=128)], ...] = Field(max_length=8)
+    cgroup_path: Annotated[str, Field(max_length=512)] | None
+    systemd_unit: Annotated[str, Field(max_length=128)] | None
+    scope: str = "one PID/start-time identity selected from current process-ranking evidence"
 
 
 class VmstatFacts(Value):
@@ -164,7 +189,13 @@ class JournalFacts(Value):
 
 
 Facts = Annotated[
-    CpuFacts | ProcessRanking | MemoryFacts | CgroupMemoryFacts | FilesystemFacts | JournalFacts,
+    CpuFacts
+    | ProcessRanking
+    | ProcessIdentityFacts
+    | MemoryFacts
+    | CgroupMemoryFacts
+    | FilesystemFacts
+    | JournalFacts,
     Field(discriminator="kind"),
 ]
 ObservationStatus = Literal["ok", "partial", "unsupported", "denied", "output_limited"]
@@ -196,6 +227,7 @@ class Observation(Value):
         expected_kind = {
             "sample_cpu_pressure": "cpu",
             "rank_processes": "processes",
+            "inspect_process_identity": "process_identity",
             "inspect_memory_pressure": "memory",
             "inspect_cgroup_memory": "cgroup_memory",
             "inspect_filesystem": "filesystem",

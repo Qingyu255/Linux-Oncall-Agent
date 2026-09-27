@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime
 from typing import Any, Protocol
 
+from oncall.broker.storage import EvidenceStore
 from oncall.config import DEFAULT_RUNTIME_CONFIG
 from oncall.domain import (
     Evidence,
@@ -16,7 +17,6 @@ from oncall.domain import (
     Report,
     utcnow,
 )
-from oncall.storage import EvidenceStore
 
 
 class TargetClient(Protocol):
@@ -104,6 +104,8 @@ class InvestigationService:
 
     async def probe(self, request: ProbeRequest) -> Evidence:
         run = self.active()
+        if request.name == "inspect_process_identity":
+            self._authorize_process_identity(run, request)
         if self.calls >= self.max_calls:
             raise PolicyError("Probe call budget exceeded")
         self.calls += 1  # No await between check and reservation in this event loop.
@@ -140,6 +142,24 @@ class InvestigationService:
             raise
         finally:
             self.tasks.discard(task)
+
+    def _authorize_process_identity(self, run: str, request: ProbeRequest) -> None:
+        """Limit process inspection to identities admitted by this run's ranking evidence."""
+        assert request.pid is not None and request.start_ticks is not None
+        ranked = any(
+            item.status == "ok"
+            and item.facts is not None
+            and item.facts.kind == "processes"
+            and any(
+                process.pid == request.pid and process.start_ticks == request.start_ticks
+                for process in item.facts.processes
+            )
+            for item in self.store.evidence(run)
+        )
+        if not ranked:
+            raise PolicyError(
+                "Process identity must come from current investigation ranking evidence"
+            )
 
     def update_hypothesis(self, hypothesis: Hypothesis) -> Hypothesis:
         run = self.active()

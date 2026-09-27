@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from oncall.progress_projection import (
+from oncall.harness.projection import (
     HYPOTHESIS_ID_PATTERN,
     HYPOTHESIS_STATUSES,
     MOUNTS,
@@ -21,6 +21,7 @@ from oncall.progress_projection import (
 START_MESSAGES = {
     "sample_cpu_pressure": "Measuring host and cgroup CPU pressure…",
     "rank_processes": "Checking which processes are using CPU…",
+    "inspect_process_identity": "Identifying the workload that owns the process…",
     "inspect_memory_pressure": "Checking host memory pressure…",
     "inspect_cgroup_memory": "Checking cgroup memory limits and OOM events…",
     "inspect_filesystem": "Checking filesystem capacity…",
@@ -117,6 +118,22 @@ def _fact_message(value: object) -> str | None:
             if cpu is not None:
                 message += f" at {cpu:.1f}% of one CPU"
             return message + "."
+    if kind == "process_identity":
+        pid = bounded_int(facts.get("pid"), 1, 2**31 - 1)
+        unit = facts.get("systemd_unit")
+        executable = facts.get("executable")
+        argv = facts.get("argv")
+        owner = unit if isinstance(unit, str) else None
+        command = " ".join(argv) if isinstance(argv, (list, tuple)) else None
+        if not command and isinstance(executable, str):
+            command = executable
+        if pid is not None and (owner or command):
+            message = f"PID {pid}"
+            if owner:
+                message += f" belongs to {owner}"
+            if command:
+                message += f" and runs {command}" if owner else f" runs {command}"
+            return message + "."
     if kind == "memory":
         available = _bytes(facts.get("mem_available_bytes"))
         total = _bytes(facts.get("mem_total_bytes"))
@@ -196,6 +213,7 @@ def operator_progress_message(event: dict[str, Any]) -> tuple[str, str, str] | N
         if tool in {
             "sample_cpu_pressure",
             "rank_processes",
+            "inspect_process_identity",
             "inspect_memory_pressure",
             "inspect_cgroup_memory",
             "inspect_filesystem",

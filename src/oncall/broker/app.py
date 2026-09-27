@@ -12,12 +12,12 @@ from mcp.server.mcpserver import MCPServer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse, StreamingResponse
 
+from oncall.broker.service import InvestigationService
+from oncall.broker.storage import EvidenceStore
+from oncall.broker.transport import HttpTargetClient
 from oncall.config import DEFAULT_RUNTIME_CONFIG, RuntimeConfig
 from oncall.domain import Hypothesis, PolicyError, ProbeRequest, Report
 from oncall.http_boundary import Boundary, secret_file
-from oncall.service import InvestigationService
-from oncall.storage import EvidenceStore
-from oncall.transport import HttpTargetClient
 
 RELAY_FIELDS = (
     "model",
@@ -98,6 +98,19 @@ def create_app(config: RuntimeConfig | None = None) -> Boundary:
         """
         result = await service.probe(
             ProbeRequest(name="rank_processes", duration_seconds=duration_seconds, limit=limit)
+        )
+        return result.model_dump(mode="json")
+
+    @mcp.tool()
+    async def inspect_process_identity(pid: int, start_ticks: int) -> dict[str, Any]:
+        """Attribute one currently ranked PID to bounded process and workload identity metadata.
+
+        The exact PID/start-ticks pair must come from rank_processes evidence in this investigation.
+        This reads sanitized argv, executable, UID, parent, and cgroup/systemd ownership only; it
+        does not read process environment, memory, open files, or execute a target command.
+        """
+        result = await service.probe(
+            ProbeRequest(name="inspect_process_identity", pid=pid, start_ticks=start_ticks)
         )
         return result.model_dump(mode="json")
 

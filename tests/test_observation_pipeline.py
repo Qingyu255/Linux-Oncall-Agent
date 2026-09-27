@@ -2,16 +2,22 @@ import json
 
 import pytest
 
+from oncall.broker.storage import EvidenceStore
 from oncall.domain import CpuFacts, Hypothesis, Observation, ProbeRequest, utcnow
-from oncall.parsers import (
+from oncall.target.parsers import (
     parse_meminfo,
     parse_memory_events,
     parse_mountinfo,
     parse_pressure,
     parse_vmstat,
 )
-from oncall.probes import CommandCapture, JournalProbe, JournalReader, RegexSanitizer
-from oncall.storage import EvidenceStore
+from oncall.target.probes import (
+    CommandCapture,
+    JournalProbe,
+    JournalReader,
+    ProcessIdentityProbe,
+    RegexSanitizer,
+)
 
 
 def proc_fixture(tmp_path):
@@ -19,6 +25,51 @@ def proc_fixture(tmp_path):
     (proc / "sys/kernel/random").mkdir(parents=True)
     (proc / "sys/kernel/random/boot_id").write_text("boot-3\n")
     return proc
+
+
+def process_stat(pid: int, start_ticks: int, parent_pid: int = 1) -> str:
+    fields = ["S", str(parent_pid), *("0" for _ in range(20))]
+    fields[11] = "20"
+    fields[12] = "3"
+    fields[19] = str(start_ticks)
+    fields[21] = "25"
+    return f"{pid} (python) {' '.join(fields)}\n"
+
+
+async def test_process_identity_is_bounded_redacted_and_bound_to_start_ticks(tmp_path):
+    proc = proc_fixture(tmp_path)
+    process = proc / "2516"
+    process.mkdir()
+    (process / "stat").write_text(process_stat(2516, 658846, 42))
+    (process / "cmdline").write_bytes(
+        b"/opt/oncall/bin/python\0-m\0oncall.lab.workload\0cpu\0--api-key\0supersecret\0"
+    )
+    (process / "status").write_text("Name:\tpython\nUid:\t1000\t1000\t1000\t1000\n")
+    (process / "cgroup").write_text("0::/system.slice/oncall-lab-workload.service\n")
+    (process / "exe").symlink_to("/opt/oncall/bin/python")
+
+    result = await ProcessIdentityProbe("target", proc).collect(
+        ProbeRequest(name="inspect_process_identity", pid=2516, start_ticks=658846)
+    )
+
+    assert result.status == "ok"
+    assert result.facts is not None and result.facts.kind == "process_identity"
+    assert result.facts.parent_pid == 42
+    assert result.facts.systemd_unit == "oncall-lab-workload.service"
+    assert result.facts.argv == (
+        "/opt/oncall/bin/python",
+        "-m",
+        "oncall.lab.workload",
+        "cpu",
+        "--api-key",
+        "[REDACTED]",
+    )
+    assert "supersecret" not in result.raw
+
+    stale = await ProcessIdentityProbe("target", proc).collect(
+        ProbeRequest(name="inspect_process_identity", pid=2516, start_ticks=658847)
+    )
+    assert stale.status == "unsupported" and stale.facts is None
 
 
 def test_memory_and_mount_parsers_preserve_scope_and_missing_values():
@@ -111,6 +162,10 @@ def test_artifact_pages_are_lossless_and_hypotheses_are_versioned(tmp_path):
 def test_probe_requests_reject_authority_for_the_wrong_capability():
     with pytest.raises(ValueError):
         ProbeRequest(name="inspect_filesystem", mount_id="root", scope_id="self")
+    with pytest.raises(ValueError):
+        ProbeRequest(name="inspect_process_identity", pid=2516)
+    with pytest.raises(ValueError):
+        ProbeRequest(name="sample_cpu_pressure", pid=2516, start_ticks=658846)
 
 
 def test_hypothesis_cannot_use_one_observation_as_support_and_contradiction():

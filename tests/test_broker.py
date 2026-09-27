@@ -1,4 +1,4 @@
-from oncall.broker import provider_payload
+from oncall.broker.app import provider_payload
 from oncall.config import RuntimeConfig
 
 

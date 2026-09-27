@@ -5,7 +5,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-import oncall.target as target_module
+import oncall.target.app as target_module
 from oncall.domain import CpuFacts, Observation, ProbeRequest, utcnow
 
 

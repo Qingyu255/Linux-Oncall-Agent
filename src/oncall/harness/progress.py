@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from oncall.progress_projection import (
+from oncall.harness.projection import (
     CGROUP_SCOPES,
     HYPOTHESIS_ID_PATTERN,
     HYPOTHESIS_STATUSES,
@@ -30,7 +30,7 @@ from oncall.progress_projection import (
     tool_parameters,
     tool_result_failed,
 )
-from oncall.progress_projection import (
+from oncall.harness.projection import (
     PROGRESS_PROTOCOL as PROGRESS_PROTOCOL,
 )
 
@@ -165,6 +165,10 @@ def format_parameters(tool: str, event: dict[str, Any]) -> str:
         artifact = short_id(event.get("artifact_id"))
         if artifact is not None:
             parts.append(f"artifact {artifact}")
+    if tool == "inspect_process_identity":
+        pid = bounded_int(event.get("pid"), 1, 2**31 - 1)
+        if pid is not None:
+            parts.append(f"PID {pid}")
     if tool == "update_hypothesis":
         identifier, status = event.get("hypothesis_id"), event.get("hypothesis_status")
         if isinstance(identifier, str) and HYPOTHESIS_ID_PATTERN.fullmatch(identifier):
@@ -214,6 +218,18 @@ def format_facts(value: object) -> str | None:
             parts.append(f"{cpu:.1f}% of one CPU")
         if rss is not None:
             parts.append(f"{rss} RSS")
+        return " · ".join(parts) or None
+    if kind == "process_identity":
+        pid = bounded_int(facts.get("pid"), 1, 2**31 - 1)
+        unit = safe_name(facts.get("systemd_unit"), 128)
+        executable = safe_name(facts.get("executable"), 512)
+        argv = facts.get("argv")
+        command = " ".join(argv) if isinstance(argv, (list, tuple)) else executable
+        parts = [f"PID {pid}"] if pid is not None else []
+        if unit is not None:
+            parts.append(f"unit {unit}")
+        if command:
+            parts.append(f"command {command}")
         return " · ".join(parts) or None
     if kind == "memory":
         available, total = (

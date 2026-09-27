@@ -15,7 +15,10 @@ dominant process, transient, or unsupported by the available sample.
    describe different scopes and denominators.
 3. Call `rank_processes` only when the CPU sample shows demand or when process attribution is part of
    the operator's question.
-4. Repeat a sample only when persistence matters and the first interval is ambiguous. State that the
+4. When workload ownership matters, call `inspect_process_identity` for only the dominant PID and
+   exact start ticks returned by the current ranking. Inspect another ranked PID only when it accounts
+   for material demand or distinguishes a competing explanation.
+5. Repeat a sample only when persistence matters and the first interval is ambiguous. State that the
    result still represents short windows rather than a trend.
 
 ## Interpretation patterns
@@ -24,7 +27,8 @@ dominant process, transient, or unsupported by the available sample.
 | --- | --- | --- |
 | Cgroup use reaches its quota and throttling increases while host busy retains headroom | Quota-local CPU contention during the interval | Whether the quota is mis-sized or the workload is inefficient |
 | Host busy is high across the available logical CPUs without a local quota constraint | Host-wide CPU demand during the interval | Other runnable work and persistence beyond the sample |
-| One or more processes account for most of the constrained scope's use | Dominant observed consumers | Command line, workload ownership, and business cause |
+| One or more processes account for most of the constrained scope's use | Dominant observed consumers | Workload ownership until process identity is inspected |
+| Process identity resolves to a systemd unit and bounded argv | Observed workload ownership for that PID/start-time pair | Business purpose, request source, and why the work is expensive |
 | Load is elevated but CPU busy is not | CPU saturation is not established | I/O wait, blocked tasks, and activity outside the sample |
 | Steal is material | Hypervisor contention may contribute | Whether steal is persistent or sufficient to explain latency |
 
@@ -36,8 +40,11 @@ they shared a denominator.
 
 Cite fields such as `host_busy_pct`, `host_iowait_pct`, `host_steal_pct`,
 `probe_cgroup_cpu_cores_used`, `probe_cgroup_quota_cores`,
-`probe_cgroup_throttled_usec_delta`, and `processes` only when present in the cited evidence.
+`probe_cgroup_throttled_usec_delta`, and `processes` only when present in the cited evidence. For a
+separate process-identity observation, cite only present fields such as `pid`, `start_ticks`,
+`executable`, `argv`, `cgroup_path`, and `systemd_unit`.
 
-State the sampling interval and scope. Keep application intent, request latency, command line,
+State the sampling interval and scope. Process identity may establish executable, bounded command
+line, cgroup, or systemd ownership; it does not establish business intent. Keep request latency,
 thread-level behavior, scheduler cause, and long-term persistence unresolved unless another admitted
 observation establishes them.

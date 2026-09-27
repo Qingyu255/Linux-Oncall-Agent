@@ -4,8 +4,9 @@ from io import StringIO
 from rich.console import Console
 
 import oncall.cli as cli
-from oncall.harness_progress import HarnessProgressAdapter, progress_message
-from oncall.progress_projection import bounded_assistant_response, facts_projection
+from oncall.harness.operator_view import operator_progress_message
+from oncall.harness.progress import HarnessProgressAdapter, progress_message
+from oncall.harness.projection import bounded_assistant_response, facts_projection
 
 
 def notification(kind: str, data: dict[str, object]) -> dict[str, object]:
@@ -263,6 +264,37 @@ def test_zero_usage_is_omitted_and_tuple_process_facts_are_projected():
     assert rendered[2].endswith(
         "top python??bold?unsafe?/? PID 32 · 92.0% of one CPU · 1.0 KiB RSS"
     )
+
+
+def test_process_identity_progress_names_the_owned_workload():
+    projected = facts_projection(
+        {
+            "kind": "process_identity",
+            "pid": 2516,
+            "start_ticks": 658846,
+            "name": "python",
+            "executable": "/opt/oncall/bin/python",
+            "argv": ["/opt/oncall/bin/python", "-m", "oncall.lab.workload", "cpu"],
+            "systemd_unit": "oncall-lab-workload.service",
+        }
+    )
+    event = {
+        "protocol": "oncall-progress-v1",
+        "kind": "tool_finished",
+        "tool": "inspect_process_identity",
+        "failed": False,
+        "facts": projected,
+    }
+
+    assert operator_progress_message(event) == (
+        "green",
+        "✓",
+        "PID 2516 belongs to oncall-lab-workload.service and runs "
+        "/opt/oncall/bin/python -m oncall.lab.workload cpu.",
+    )
+    verbose = progress_message(event)
+    assert verbose is not None
+    assert "unit oncall-lab-workload.service" in verbose[2]
 
 
 def test_hypothesis_transition_and_continuation_relationship_are_projected():

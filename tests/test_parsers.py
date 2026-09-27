@@ -1,6 +1,6 @@
 import pytest
 
-from oncall.parsers import (
+from oncall.target.parsers import (
     cpu_percentages,
     parse_cpu_quota,
     parse_cpu_stat,

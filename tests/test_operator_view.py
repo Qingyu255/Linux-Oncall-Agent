@@ -1,4 +1,4 @@
-from oncall.operator_view import operator_progress_message
+from oncall.harness.operator_view import operator_progress_message
 
 
 def event(kind: str, **values: object) -> dict[str, object]:

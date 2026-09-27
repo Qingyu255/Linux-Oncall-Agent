@@ -91,7 +91,7 @@ Environment=TARGET_ID=$INSTANCE_ID
 Environment=ONCALL_SECRETS_DIR=/etc/oncall
 Environment=ONCALL_LAB_CGROUP=/sys/fs/cgroup/oncall.slice/oncall-lab.slice
 Environment=ONCALL_LAB_MOUNT=/var/lib/oncall-lab/data
-ExecStart=/opt/oncall/bin/uvicorn oncall.target:create_app --factory --host 127.0.0.1 --port 8765 --no-access-log --ssl-keyfile /etc/oncall/target-key.pem --ssl-certfile /etc/oncall/target-ca.pem
+ExecStart=/opt/oncall/bin/uvicorn oncall.target.app:create_app --factory --host 127.0.0.1 --port 8765 --no-access-log --ssl-keyfile /etc/oncall/target-key.pem --ssl-certfile /etc/oncall/target-ca.pem
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true

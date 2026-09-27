@@ -38,6 +38,8 @@ credible.
 3. Maintain a primary explanation and at least one credible alternative. Use `update_hypothesis` when
    evidence materially supports, weakens, or rejects one; do not update it merely to create activity.
 4. Collect the next probe only when its possible outcomes would change the report.
+   For process ownership, inspect only a PID/start-time pair returned by current ranking evidence;
+   do not enumerate identities or inspect unrelated processes.
 5. Stop when the primary scope and condition are supported, important alternatives are bounded, and
    further available probes would only repeat the same short-window evidence.
 

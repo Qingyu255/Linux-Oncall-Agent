@@ -9,7 +9,7 @@ from pathlib import Path
 from deepseek_harness import DeepSeekHarness  # type: ignore[import-untyped]
 
 from oncall.config import RuntimeConfig
-from oncall.harness_progress import PROGRESS_PROTOCOL, HarnessProgressAdapter
+from oncall.harness.progress import PROGRESS_PROTOCOL, HarnessProgressAdapter
 from oncall.http_boundary import secret_file
 
 

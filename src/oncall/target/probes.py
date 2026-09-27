@@ -23,10 +23,11 @@ from oncall.domain import (
     ProbeName,
     ProbeRequest,
     ProcessFacts,
+    ProcessIdentityFacts,
     ProcessRanking,
     utcnow,
 )
-from oncall.parsers import (
+from oncall.target.parsers import (
     ProcessTicks,
     cpu_percentages,
     parse_cgroup_stat,
@@ -264,6 +265,112 @@ class ProcessRankingProbe(LinuxProbe):
         )
         limitations = ("Process scan capped at 2048 entries",) if limited1 or limited2 else ()
         return Collected(facts, raw, limitations)
+
+
+class ProcessIdentityProbe(LinuxProbe):
+    """Read bounded ownership metadata for one previously ranked process identity."""
+
+    name: ProbeName = "inspect_process_identity"
+    maximum_cmdline_bytes = 16 * 1024
+    maximum_arguments = 8
+    maximum_argument_chars = 128
+    sensitive_option = re.compile(
+        r"(?i)(?:password|passwd|token|secret|api[_-]?key|authorization|credential)"
+    )
+    systemd_suffixes = (".service", ".scope")
+
+    @staticmethod
+    def _read_prefix(path: Path, maximum: int) -> tuple[bytes, bool]:
+        with path.open("rb") as stream:
+            value = stream.read(maximum + 1)
+        return value[:maximum], len(value) > maximum
+
+    @classmethod
+    def _sanitize_argv(cls, raw: bytes) -> tuple[tuple[str, ...], bool]:
+        decoded = raw.decode("utf-8", errors="replace").split("\0")
+        arguments = [item for item in decoded if item]
+        limited = len(arguments) > cls.maximum_arguments
+        result: list[str] = []
+        redact_next = False
+        sanitizer = RegexSanitizer()
+        for argument in arguments[: cls.maximum_arguments]:
+            sanitized = sanitizer.sanitize(argument)
+            sensitive = cls.sensitive_option.search(argument) is not None
+            if redact_next or (sensitive and "=" not in argument):
+                value = "[REDACTED]" if redact_next else sanitized
+            else:
+                value = sanitized
+            redact_next = sensitive and "=" not in argument
+            if len(value) > cls.maximum_argument_chars:
+                value = value[: cls.maximum_argument_chars]
+                limited = True
+            result.append(value)
+        return tuple(result), limited
+
+    @classmethod
+    def _systemd_unit(cls, cgroup_path: str) -> str | None:
+        for component in reversed(cgroup_path.split("/")):
+            if component.endswith(cls.systemd_suffixes):
+                return component[:128]
+        return None
+
+    async def _collect(self, request: ProbeRequest) -> Collected:
+        assert request.pid is not None and request.start_ticks is not None
+        path = self.proc / str(request.pid)
+        before = parse_process_stat(read_bounded(path / "stat", 8192))
+        if before.pid != request.pid or before.start_ticks != request.start_ticks:
+            raise UnsupportedProbe("process identity is stale")
+
+        limitations: list[str] = []
+        executable: str | None = None
+        try:
+            executable = os.readlink(path / "exe")[:512]
+        except OSError:
+            limitations.append("Executable path unavailable")
+
+        argv: tuple[str, ...] = ()
+        try:
+            raw_cmdline, cmdline_limited = self._read_prefix(
+                path / "cmdline", self.maximum_cmdline_bytes
+            )
+            argv, argument_limited = self._sanitize_argv(raw_cmdline)
+            if cmdline_limited or argument_limited:
+                limitations.append("Command line was truncated and sanitized")
+        except (FileNotFoundError, PermissionError):
+            limitations.append("Command line unavailable")
+
+        uid: int | None = None
+        try:
+            for line in read_bounded(path / "status", 64 * 1024).splitlines():
+                if line.startswith("Uid:"):
+                    uid = int(line.split()[1])
+                    break
+            if uid is None:
+                limitations.append("Process UID unavailable")
+        except (FileNotFoundError, PermissionError, ValueError, IndexError):
+            limitations.append("Process UID unavailable")
+
+        cgroup_path: str | None = None
+        try:
+            cgroup_path = parse_self_cgroup(read_bounded(path / "cgroup", 16 * 1024))[:512]
+        except (FileNotFoundError, PermissionError, ValueError):
+            limitations.append("Process cgroup membership unavailable")
+
+        after = parse_process_stat(read_bounded(path / "stat", 8192))
+        if after.pid != before.pid or after.start_ticks != before.start_ticks:
+            raise UnsupportedProbe("process changed during observation")
+        facts = ProcessIdentityFacts(
+            pid=before.pid,
+            start_ticks=before.start_ticks,
+            name=before.name,
+            parent_pid=before.parent_pid,
+            uid=uid,
+            executable=executable,
+            argv=argv,
+            cgroup_path=cgroup_path,
+            systemd_unit=self._systemd_unit(cgroup_path) if cgroup_path else None,
+        )
+        return Collected(facts, facts.model_dump_json(), tuple(limitations))
 
 
 class MemoryPressureProbe(LinuxProbe):
@@ -575,6 +682,7 @@ def default_registry(
     probes: tuple[LinuxProbe, ...] = (
         CpuPressureProbe(target_id, proc, self_cgroup),
         ProcessRankingProbe(target_id, proc),
+        ProcessIdentityProbe(target_id, proc),
         MemoryPressureProbe(target_id, proc),
         CgroupMemoryProbe(target_id, proc, {"self": self_cgroup, "lab": lab_cgroup}),
         FilesystemProbe(target_id, proc, {"root": Path("/"), "lab": lab_mount}),

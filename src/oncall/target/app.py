@@ -13,7 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from oncall.config import RuntimeConfig
 from oncall.domain import Observation, ProbeRequest
 from oncall.http_boundary import Boundary, secret_file
-from oncall.probes import default_registry
+from oncall.target.probes import default_registry
 
 
 def create_app(config: RuntimeConfig | None = None) -> Boundary:

@@ -21,6 +21,7 @@ TOOL_LABELS = {
     "skill": "Loading diagnostic guidance",
     "sample_cpu_pressure": "Sampling CPU pressure",
     "rank_processes": "Ranking CPU-consuming processes",
+    "inspect_process_identity": "Identifying process ownership",
     "inspect_memory_pressure": "Inspecting host memory pressure",
     "inspect_cgroup_memory": "Inspecting cgroup memory events",
     "inspect_filesystem": "Inspecting filesystem capacity",
@@ -39,6 +40,7 @@ SKILL_NAMES = {
 PROBE_TOOLS = {
     "sample_cpu_pressure",
     "rank_processes",
+    "inspect_process_identity",
     "inspect_memory_pressure",
     "inspect_cgroup_memory",
     "inspect_filesystem",
@@ -204,6 +206,13 @@ def tool_parameters(tool: str, raw: object) -> dict[str, object]:
             result["duration_seconds"] = duration
     if tool in {"rank_processes", "query_service_journal", "read_artifact"} and limit is not None:
         result["limit"] = limit
+    if tool == "inspect_process_identity":
+        pid = bounded_int(args.get("pid"), 1, 2**31 - 1)
+        start_ticks = bounded_int(args.get("start_ticks"), 1, 2**63 - 1)
+        if pid is not None:
+            result["pid"] = pid
+        if start_ticks is not None:
+            result["start_ticks"] = start_ticks
     if tool == "inspect_cgroup_memory" and args.get("scope_id") in CGROUP_SCOPES:
         result["scope_id"] = args["scope_id"]
     if tool == "inspect_filesystem" and args.get("mount_id") in MOUNTS:
@@ -303,6 +312,24 @@ def facts_projection(value: object) -> dict[str, object]:
             projected = projector(source.get(source_name))
             if projected is not None:
                 result[destination] = projected
+    elif kind == "process_identity":
+        result["kind"] = kind
+        for source_name, destination, identity_projector in (
+            ("pid", "pid", lambda item: bounded_int(item, 1, 2**31 - 1)),
+            ("name", "name", lambda item: safe_name(item, 128)),
+            ("executable", "executable", lambda item: safe_name(item, 512)),
+            ("systemd_unit", "systemd_unit", lambda item: safe_name(item, 128)),
+        ):
+            identity_projected = identity_projector(value.get(source_name))
+            if identity_projected is not None:
+                result[destination] = identity_projected
+        argv = value.get("argv")
+        if isinstance(argv, (list, tuple)) and len(argv) <= 8:
+            projected_argv = tuple(
+                projected for item in argv if (projected := safe_name(item, 128)) is not None
+            )
+            if projected_argv:
+                result["argv"] = projected_argv
     elif kind == "memory":
         result["kind"] = kind
         for key in (
