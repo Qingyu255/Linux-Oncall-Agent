@@ -41,6 +41,7 @@ class HarnessRunOutcome:
     return_code: int
     assistant_response: str | None
     tool_calls: int
+    harness_started: bool = False
 
 
 def display_path(path: Path) -> str:
@@ -311,14 +312,17 @@ def run_harness(
     selector.register(process.stdout, selectors.EVENT_READ)
     assistant_response: str | None = None
     tool_calls = 0
+    harness_started = False
 
     def consume(line: str) -> None:
-        nonlocal assistant_response, tool_calls
+        nonlocal assistant_response, harness_started, tool_calls
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             event = None
         if isinstance(event, dict) and event.get("protocol") == PROGRESS_PROTOCOL:
+            if event.get("kind") == "harness_started":
+                harness_started = True
             if event.get("kind") == "tool_started":
                 tool_calls += 1
         response = handle_harness_line(line, started, verbose=verbose, activity=activity)
@@ -342,7 +346,7 @@ def run_harness(
                     consume(line)
         for line in process.stdout:
             consume(line)
-        return HarnessRunOutcome(process.wait(), assistant_response, tool_calls)
+        return HarnessRunOutcome(process.wait(), assistant_response, tool_calls, harness_started)
     finally:
         selector.close()
         process.stdout.close()
@@ -421,6 +425,11 @@ def execute_investigation(
             if activity is not None:
                 activity.stop()
         if outcome.return_code:
+            if not outcome.harness_started:
+                raise RuntimeError(
+                    "Agent container failed before the harness started. "
+                    "Rebuild it with 'docker compose build agent' and retry"
+                )
             raise RuntimeError(f"Harness exited with {outcome.return_code}")
         state_value = connection.get("/admin/state").raise_for_status().json()
         if not isinstance(state_value, dict):

@@ -309,6 +309,43 @@ def test_default_incomplete_run_has_a_short_recovery_message(monkeypatch):
     assert "Investigation failed" not in rendered
 
 
+def test_agent_startup_failure_recommends_rebuilding_the_image(monkeypatch):
+    output = StringIO()
+    monkeypatch.setattr(cli, "console", Console(file=output, force_terminal=False, width=100))
+    monkeypatch.setattr(
+        cli,
+        "run_harness",
+        lambda *_args, **_options: cli.HarnessRunOutcome(1, None, 0),
+    )
+    monkeypatch.setattr(cli, "save_state", lambda *_args, **_options: Path("failed-state.json"))
+
+    class Response:
+        def raise_for_status(self):
+            return self
+
+        def json(self):
+            return {"investigation_id": "a" * 32, "status": "cancelled", "events": []}
+
+    class Connection:
+        def get(self, _path):
+            return Response()
+
+        def post(self, _path):
+            return Response()
+
+    result = cli.execute_investigation(
+        Connection(),  # type: ignore[arg-type]
+        "a" * 32,
+        "Investigate CPU pressure",
+        "Investigate CPU pressure",
+        exit_on_failure=False,
+    )
+
+    assert result is None
+    assert "failed before the harness started" in output.getvalue()
+    assert "docker compose build agent" in output.getvalue()
+
+
 def test_conversational_response_requires_no_diagnostic_actions():
     state = {
         "status": "running",

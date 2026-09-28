@@ -142,14 +142,20 @@ Keep the tunnel open in a dedicated terminal:
 scripts/aws_lab.sh tunnel
 ```
 
-In another terminal, start only the local broker, point it at the tunnel, and verify that `doctor` reports the EC2 instance rather than `docker-target`. The EC2 target was already created by `setup`; Compose does not provision it:
+In another terminal, build both local images used at investigation time, start only the local broker,
+point it at the tunnel, and verify that `doctor` reports the EC2 instance rather than `docker-target`.
+The EC2 target was already created by `setup`; Compose does not provision it:
 
 ```bash
+docker compose -f compose.yaml -f compose.aws.yaml build broker agent
 docker compose -f compose.yaml -f compose.aws.yaml \
-  up -d --wait --build --force-recreate broker
+  up -d --wait --force-recreate broker
 
 .venv/bin/oncall doctor
 ```
+
+Rebuild `broker` and `agent` after changing Python packages, the Dockerfile, or harness configuration.
+The CLI creates a fresh agent container for each turn from the already-built `agent` image.
 
 Create a leased fault, investigate it, and clean up the exact workload. The short commands default
 to `.local/aws/inventory.json` and a 120-second TTL:
