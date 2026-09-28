@@ -129,16 +129,14 @@ the operator laptop.
 
 ## Decisions that shaped the design
 
-| ADR | Decision | Tradeoff |
-|---|---|---|
-| 001 | Keep reasoning off the target | Deploy a small probe service and transport boundary |
-| 002 | Keep Python policy independent of DSH | Maintain explicit harness adapters |
-| 003 | Use MCP for the harness and typed HTTPS for the target | Two protocols with separate responsibilities |
-| 006 | Store immutable evidence separately from interpretation | Own SQLite and artifact durability |
-| 008 | Keep mutation operator-only | No automatic remediation |
-| 009 | Prove boundaries in Docker, then preserve them on EC2 | Support local and remote transports |
-
-Full rationale: [`decisions.md`](decisions.md)
+| Decision | Tradeoff |
+|---|---|
+| Keep reasoning off the target | Deploy a small probe service and transport boundary |
+| Keep Python policy independent of DSH | Maintain explicit harness adapters |
+| Use MCP for the harness and typed HTTPS for the target | Two protocols with separate responsibilities |
+| Store immutable evidence separately from interpretation | Own SQLite and artifact durability |
+| Keep mutation operator-only | No automatic remediation |
+| Prove boundaries in Docker, then preserve them on EC2 | Support local and remote transports |
 
 ---
 
@@ -182,25 +180,17 @@ Detailed path: [`investigation-sequence.md`](investigation-sequence.md)
 
 ```mermaid
 flowchart LR
-    R[Rank processes over<br/>a short interval] --> I[Record PID and<br/>start ticks]
-    I --> A{Pair came from current<br/>investigation evidence?}
-    A -->|No| X[Reject before target I/O]
-    A -->|Yes| P[Read bounded procfs identity]
-    P --> C{Pair still matches<br/>after collection?}
-    C -->|No| U[Return unsupported]
-    C -->|Yes| E[Admit sanitized ownership facts]
+    R[Rank processes] --> I[Bind one process instance]
+    I --> A[Authorize bounded identity read]
+    A --> E[Return sanitized ownership facts]
 ```
 
-Linux can reuse a PID. The broker therefore authorizes the exact PID and start-tick pair returned by
-current ranking evidence. The target checks it before and after reading `stat`, `status`, `cmdline`,
-`exe`, and `cgroup`. It never reads the process environment.
-
-This one feature combines Linux semantics, a time-of-check/time-of-use race, evidence-derived
-authorization, sanitization, output bounds, and explicit uncertainty.
+Linux can reuse a PID, so the broker authorizes a specific process instance observed in current
+evidence. The target rejects stale or reused identities and returns only bounded, sanitized ownership
+facts. This is one example of Linux semantics directly shaping the security design.
 
 Code: [`broker authorization`](../src/oncall/broker/service.py#L146) ·
 [`process collector`](../src/oncall/target/probes.py#L270) ·
-[`race and redaction test`](../tests/test_observation_pipeline.py#L39)
 
 ---
 
@@ -217,11 +207,9 @@ The workload creates genuine scheduler pressure through a controlled synthetic c
 not know the scenario and cannot start or stop it. A retained report is the fallback if venue
 networking prevents a live model request.
 
-Runbook: [`evaluation-and-demo.md`](evaluation-and-demo.md)
-
 ---
 
-## Show the actual code
+## Code Walkthrough
 
 ```mermaid
 flowchart LR
@@ -236,21 +224,18 @@ flowchart LR
 
     S --> D
     S -->|depends on| TC
-    HT -. implements .-> TC
+    HT --> TC
     HT -->|typed HTTP| TA --> P --> PS
     S --> ST --> D
 ```
 
-| Review question | Open |
+| Scope | Open |
 |---|---|
 | How is model authority constrained? | [`ProbeRequest`](../src/oncall/domain.py#L13) |
 | Where are deadlines, budgets, and evidence admission enforced? | [`InvestigationService.probe`](../src/oncall/broker/service.py#L105) |
 | How does every collector share timing and boot identity? | [`LinuxProbe.collect`](../src/oncall/target/probes.py#L70) |
 | How does raw evidence become durable before metadata? | [`EvidenceStore.add`](../src/oncall/broker/storage.py#L107) |
 | How are duplicate requests and disconnects handled? | [`target.create_app`](../src/oncall/target/app.py#L19) |
-
-The code discussion is the centre of the interview. The diagrams establish context; these links are
-where implementation choices, failure paths, tests, and alternatives become concrete.
 
 ---
 
@@ -276,7 +261,7 @@ The main lessons are compact:
 
 ---
 
-## Direction
+## Direction moving forward
 
 ```mermaid
 flowchart LR
@@ -292,11 +277,3 @@ flowchart LR
 
 The broker evolves into an application-level control plane rather than a generic proxy. Authority and
 evidence remain independent of whichever model or harness performs the reasoning.
-
-> I began by trying to understand agent harnesses and Linux internals. The project connected them:
-> adaptive diagnosis is useful only when the surrounding system makes its authority and evidence
-> explicit.
-
-Further detail: [architecture tour](architecture-tour.md) ·
-[security and reliability](security-and-reliability.md) ·
-[production architecture](production-architecture.md)
