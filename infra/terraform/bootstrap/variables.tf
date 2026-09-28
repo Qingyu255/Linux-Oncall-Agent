@@ -13,7 +13,6 @@ variable "project" {
 variable "owner" {
   type        = string
   description = "Human-readable owner tag."
-  default     = "qingyu"
 }
 
 variable "expiry" {

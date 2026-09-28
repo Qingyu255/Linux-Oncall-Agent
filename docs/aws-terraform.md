@@ -67,13 +67,17 @@ SSM agent may run as root; the probe service does not inherit that authority. Th
 ```text
 infra/terraform/
   bootstrap/          # state and release buckets; initially local state
-  environments/lab/   # backend.tf, providers.tf, main.tf, variables.tf, outputs.tf
-  templates/          # cloud-init and systemd unit templates
+  environments/lab/   # S3-backed disposable target root
+  templates/          # target cloud-init and systemd service definition
 ```
 
 Start with a flat lab root; extract a target module only when there is a real second consumer. Pin Terraform/provider constraints and commit `.terraform.lock.hcl`. Resolve a supported AMI deliberately and record the ID; do not let an unreviewed latest-image lookup silently change evaluation machines.
 
-Use S3 backend native locking with `use_lockfile = true`, plus bucket versioning. [HashiCorp documents required S3 permissions and locking](https://developer.hashicorp.com/terraform/language/backend/s3). Bootstrap begins with protected local state; after creating the bucket, migrate bootstrap state to a separate key. Lab state uses its own key. Keep credentials out of backend config, variables and user data. `sensitive = true` hides display but does not remove secrets from state.
+The bootstrap root retains protected local state because it creates and later destroys the state
+bucket. The lab root uses the encrypted, versioned S3 bucket with native lockfiles. [HashiCorp
+documents the required S3 permissions and locking](https://developer.hashicorp.com/terraform/language/backend/s3).
+Keep credentials out of backend configuration, variables and user data. `sensitive = true` hides
+display but does not remove secrets from state.
 
 Inputs: region, AZ, project/owner tags, expiry tag, instance type, AMI ID, allowed account ID, release digest/key, volume sizes, enable-lab flag and budget settings. Validate CIDRs, size bounds and account/environment. Outputs: instance ID, region, target alias, probe port and non-secret inventory. Do not output bearer tokens or private keys.
 
@@ -119,6 +123,10 @@ local plugin. Provisioning remains an operator task; model output never triggers
 
 Estimate before launch using current regional prices: instance-hours + EBS GiB-months prorated + public IPv4 hours + S3 storage/requests + any transfer + model tokens. No dollar quote is asserted here. An expiry tag alone does not delete anything; manually destroy at session end. Optional scheduled cleanup is later work with separately scoped permissions.
 
-On teardown: cancel investigations, reset lab faults, export selected reports, stop tunnels, review and apply a destroy plan for the lab, then verify EC2, lab EBS and project networking are gone. Check for retained volumes, snapshots and public IP allocations. Stopping EC2 does not remove storage charges. Retain state bucket intentionally; deleting it requires separate state recovery/export and handling all object versions. Release objects need a short lifecycle policy. Keep bootstrap and lab destroy paths separate so normal cleanup cannot erase the state backend.
+On teardown: cancel investigations, reset lab faults, export selected reports, stop tunnels, review and
+apply a destroy plan for the lab, then verify EC2, lab EBS and project networking are gone. Only after
+the lab state is empty does the wrapper destroy the release and state buckets through the bootstrap
+root. Stopping EC2 does not remove storage charges. Keep bootstrap and lab destroy steps ordered so the
+state backend remains available until every lab resource has been removed.
 
 Acceptance: `terraform fmt -check`, `validate`, plan inspection, successful clean apply, authenticated probe, instance replacement, and clean destroy. Static validation alone does not establish working IAM, networking or bootstrap.

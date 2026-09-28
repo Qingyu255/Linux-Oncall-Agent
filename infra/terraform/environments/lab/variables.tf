@@ -56,10 +56,11 @@ variable "release_sha256" {
 }
 
 variable "owner" {
-  type    = string
-  default = "qingyu"
+  type        = string
+  description = "Human-readable owner tag."
 }
 
 variable "expiry" {
-  type = string
+  type        = string
+  description = "Operator-visible RFC3339 expiry tag; cleanup remains explicit."
 }
