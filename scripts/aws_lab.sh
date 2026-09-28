@@ -256,7 +256,7 @@ PY
   printf 'Release:   %s\n' "$sha"
   printf '\nNext:\n'
   printf '  Terminal 1: scripts/aws_lab.sh tunnel --inventory %q\n' "$INVENTORY"
-  printf '  Terminal 2: docker compose -f compose.yaml -f compose.aws.yaml up -d --wait --force-recreate broker\n'
+  printf '  Terminal 2: docker compose -f compose.yaml -f compose.aws.yaml up -d --wait --build --force-recreate broker\n'
   printf '              .venv/bin/oncall doctor\n'
   trap - ERR
 }

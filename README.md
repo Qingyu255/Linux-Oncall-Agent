@@ -146,7 +146,7 @@ In another terminal, start only the local broker, point it at the tunnel, and ve
 
 ```bash
 docker compose -f compose.yaml -f compose.aws.yaml \
-  up -d --wait --force-recreate broker
+  up -d --wait --build --force-recreate broker
 
 .venv/bin/oncall doctor
 ```
